@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>حروف مع منديلي</title>
+  <link rel="stylesheet" href="style.css">
+  <link href="https://fonts.googleapis.com/css2?family=Changa:wght@700;800&display=swap" rel="stylesheet">
+  <!-- مكتبة توليد الـ QR Code -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <!-- مكتبة PeerJS للربط اللحظي -->
+  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+</head>
+<body>
+
+  <!-- 1. شاشة المقدمة -->
+  <div id="introScreen" class="overlay-screen">
+    <div class="animated-bg-hexes"></div>
+
+    <div class="intro-content">
+      <div class="animated-logo">
+        <svg class="intro-hex glow-hex" viewBox="0 0 100 115">
+          <polygon points="50,5 95,30 95,85 50,110 5,85 5,30" />
+          <text x="50%" y="55%" text-anchor="middle" dominant-baseline="middle">م</text>
+        </svg>
+      </div>
+      <h1 class="intro-title">حروف مع منديلي</h1>
+      <p class="intro-subtitle">مسابقة الحروف والذكاء التفاعلية</p>
+      
+      <div class="qr-container">
+        <p class="qr-label">امسح الباركود لفتح اللعبة على الهاتف:</p>
+        <div id="gameQRCode" class="qr-box"></div>
+      </div>
+
+      <button class="btn-start" onclick="goToSettings()">ابدأ المسابقة 🚀</button>
+    </div>
+  </div>
+
+  <!-- 2. شاشة الإعدادات -->
+  <div id="settingsScreen" class="overlay-screen hidden">
+    <div class="settings-card">
+      <h2>إعدادات الفرق والألوان</h2>
+
+      <div class="team-config">
+        <h3>الفريق الأول (رأسي)</h3>
+        <input type="text" id="team1NameInput" value="الفريق الأول" placeholder="اسم الفريق الأول">
+        <div class="color-picker-group">
+          <label>اختر اللون:</label>
+          <input type="color" id="team1ColorInput" value="#71bf43">
+        </div>
+      </div>
+
+      <div class="team-config">
+        <h3>الفريق الثاني (أفقي)</h3>
+        <input type="text" id="team2NameInput" value="الفريق الثاني" placeholder="اسم الفريق الثاني">
+        <div class="color-picker-group">
+          <label>اختر اللون:</label>
+          <input type="color" id="team2ColorInput" value="#f58220">
+        </div>
+      </div>
+
+      <button class="btn-start" onclick="startGame()">الدخول لشاشة اللعبة 🎮</button>
+    </div>
+  </div>
+
+  <!-- 3. نافذة احتفالية الفوز المنبثقة (Modal) -->
+  <div id="winnerModal" class="overlay-screen hidden" style="z-index: 3000;">
+    <div class="winner-card">
+      <div class="trophy-icon">🏆</div>
+      <h2 id="winnerTeamName">مبروك للفريق الفائز!</h2>
+      <p>تم توصيل المسار بنجاح واقتناص هذه الجولة!</p>
+      <button class="btn-start" onclick="closeWinnerModal()" style="margin-top: 15px;">استمرار 🚀</button>
+    </div>
+  </div>
+
+  <!-- 4. شاشة اللعبة الرئيسية -->
+  <div id="mainGame" class="game-wrapper hidden">
+    <div id="confettiContainer" class="confetti-container"></div>
+
+    <!-- شبكة الحروف السداسية -->
+    <div class="board-section">
+      <div class="hex-grid" id="hexGrid"></div>
+    </div>
+
+    <!-- القائمة الجانبية -->
+    <div class="sidebar-section">
+      <div class="top-bar">
+        <button class="menu-btn" onclick="openSettings()">⚙️</button>
+        <div class="round-title" id="roundTitle">الجولة الأولى</div>
+      </div>
+
+      <div class="buzzer-status-card" id="buzzerStatusCard">
+        <span id="roomCodeDisplay">كود ربط الهواتف: جاري الاتصال...</span>
+      </div>
+
+      <!-- بطاقة السؤال -->
+      <div class="question-card">
+        <div class="letter-badge" id="currentLetterBadge">؟</div>
+        
+        <div class="question-content-box">
+          <p class="question-text" id="questionText">اختر حرفاً من الخلية لبدء السؤال</p>
+          <div class="answer-text hidden" id="answerText"></div>
+        </div>
+
+        <div class="card-buttons">
+          <button class="btn btn-show-answer" id="showAnswerBtn" onclick="toggleAnswer()" style="display:none;">عرض الإجابة</button>
+          <button class="btn btn-new-question" id="newQuestionBtn" onclick="changeQuestion()" style="display:none;">سؤال جديد</button>
+        </div>
+
+        <div class="team-assign-buttons" id="teamAssignButtons" style="display:none;">
+          <button class="btn-assign" onclick="assignTileToTeam(1)">
+            <span class="team-box-indicator t1-box"></span>
+            <span id="assignT1Label">الفريق الأول</span>
+          </button>
+          <button class="btn-assign" onclick="assignTileToTeam(2)">
+            <span class="team-box-indicator t2-box"></span>
+            <span id="assignT2Label">الفريق الثاني</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- المؤقت -->
+      <div class="timer-card">
+        <div class="timer-display" id="timerDisplay">00</div>
+        <div class="timer-buttons">
+          <button class="btn-timer btn-3s" onclick="startTimer(3)">3 ثوانٍ</button>
+          <button class="btn-timer btn-10s" onclick="startTimer(10)">10 ثوانٍ</button>
+        </div>
+      </div>
+
+      <!-- لوحة النقاط -->
+      <div class="teams-scores">
+        <div class="team-row" id="team1Row">
+          <button class="check-btn" onclick="addScore(1)">✔</button>
+          <span class="team-name" id="team1Label">الفريق الأول</span>
+          <span class="score-box" id="scoreTeam1">0</span>
+        </div>
+        <div class="team-row" id="team2Row">
+          <button class="check-btn" onclick="addScore(2)">✔</button>
+          <span class="team-name" id="team2Label">الفريق الثاني</span>
+          <span class="score-box" id="scoreTeam2">0</span>
+        </div>
+      </div>
+      
+      <button class="btn-next-round" onclick="nextRound()">الجولة التالية 🔄</button>
+    </div>
+  </div>
+
+  <script src="question.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>
