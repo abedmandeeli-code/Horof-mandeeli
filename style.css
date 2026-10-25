@@ -24,29 +24,9 @@ body {
   justify-content: center;
   align-items: center;
   z-index: 2000;
-  overflow: hidden;
-}
-
-.animated-bg-hexes {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background-image: radial-gradient(rgba(255, 222, 0, 0.15) 2px, transparent 2px);
-  background-size: 35px 35px;
-  animation: moveBackground 15s linear infinite;
-  opacity: 0.5;
-}
-
-@keyframes moveBackground {
-  0% { background-position: 0 0; }
-  100% { background-position: 350px 350px; }
 }
 
 .intro-content, .settings-card, .winner-card {
-  position: relative;
-  z-index: 10;
   background: rgba(255, 255, 255, 0.08);
   backdrop-filter: blur(12px);
   border: 2px solid #5d2592;
@@ -63,22 +43,13 @@ body {
 .trophy-icon { font-size: 65px; margin-bottom: 10px; }
 
 .animated-logo { display: flex; justify-content: center; margin-bottom: 10px; }
-.intro-hex { width: 95px; height: 105px; fill: #ffde00; stroke: #ffffff; stroke-width: 6px; }
+.intro-hex { width: 80px; height: 90px; fill: #ffde00; stroke: #ffffff; stroke-width: 6px; }
 .intro-hex text { font-size: 45px; font-weight: bold; fill: #4b1a78; }
 
-.glow-hex {
-  filter: drop-shadow(0 0 15px rgba(255, 222, 0, 0.8));
-  animation: pulseLogo 2s infinite ease-in-out;
-}
-
-@keyframes pulseLogo {
-  0%, 100% { transform: scale(1); filter: drop-shadow(0 0 15px rgba(255, 222, 0, 0.8)); }
-  50% { transform: scale(1.08); filter: drop-shadow(0 0 28px rgba(255, 222, 0, 1)); }
-}
-
-.intro-title { font-size: 32px; color: #ffde00; margin-bottom: 4px; text-shadow: 0 2px 8px rgba(0,0,0,0.5); }
+.intro-title { font-size: 30px; color: #ffde00; margin-bottom: 4px; }
 .intro-subtitle { font-size: 15px; color: #d1c4e9; margin-bottom: 15px; }
 
+/* تنسيق الباركود في المقدمة */
 .qr-container {
   margin: 10px 0;
   display: flex;
@@ -93,7 +64,6 @@ body {
   display: flex;
   justify-content: center;
   align-items: center;
-  box-shadow: 0 4px 15px rgba(0,0,0,0.3);
 }
 
 .btn-start {
@@ -106,12 +76,6 @@ body {
   border-radius: 12px;
   cursor: pointer;
   width: 100%;
-  transition: transform 0.2s, filter 0.2s;
-}
-
-.btn-start:hover {
-  transform: translateY(-2px);
-  filter: brightness(1.1);
 }
 
 .team-config {
@@ -135,7 +99,7 @@ body {
 .color-picker-group { display: flex; align-items: center; justify-content: space-between; }
 .color-picker-group input[type="color"] { border: none; width: 40px; height: 40px; border-radius: 50%; cursor: pointer; background: none; }
 
-/* منطقة اللعبة */
+/* منطقة اللعبة الرئيسية */
 .game-wrapper {
   display: flex;
   width: 100vw;
@@ -163,7 +127,7 @@ body {
   height: 88px;
   margin: 0 -1px;
   cursor: pointer;
-  transition: transform 0.15s, fill 0.3s;
+  transition: transform 0.15s;
   fill: #ffffff;
   stroke: #5d2592;
   stroke-width: 7px;
@@ -179,23 +143,6 @@ body {
 .hex-svg.team1 .hex-text { fill: #ffffff !important; }
 .hex-svg.team2 { fill: var(--team2-color, #f58220) !important; }
 .hex-svg.team2 .hex-text { fill: #ffffff !important; }
-
-/* أنيميشن توهج المسار الفائز */
-.hex-svg.winning-path {
-  animation: winGlow 0.6s infinite alternate ease-in-out !important;
-  z-index: 100 !important;
-}
-
-@keyframes winGlow {
-  0% {
-    filter: drop-shadow(0 0 8px #ffffff) brightness(1.2);
-    transform: scale(1.08);
-  }
-  100% {
-    filter: drop-shadow(0 0 30px #ffde00) brightness(1.6);
-    transform: scale(1.22);
-  }
-}
 
 /* القائمة الجانبية */
 .sidebar-section {
@@ -226,6 +173,7 @@ body {
   font-weight: bold;
 }
 
+/* بطاقة السؤال الثابتة لمنع اهتزاز الشاشة */
 .question-card {
   background-color: #260c42;
   border: 2px solid #5d2592;
@@ -274,21 +222,27 @@ body {
 
 .btn-assign {
   flex: 1;
-  padding: 6px;
+  padding: 6px 1px;
   border: 1px solid rgba(255,255,255,0.2);
   border-radius: 6px;
   background-color: rgba(255, 255, 255, 0.08);
   font-weight: bold;
-  font-size: 13px;
+  font-size: 12px;
   cursor: pointer;
   color: #ffffff;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 4px;
 }
 
-.team-box-indicator { width: 14px; height: 14px; border-radius: 3px; display: inline-block; }
+.btn-reset-tile {
+  background-color: #e74c3c !important;
+  flex: 0.6 !important;
+  font-size: 18px !important;
+}
+
+.team-box-indicator { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
 .t1-box { background-color: var(--team1-color, #71bf43); }
 .t2-box { background-color: var(--team2-color, #f58220); }
 
@@ -324,7 +278,7 @@ body {
   margin-top: auto;
 }
 
-/* القصاصات الملونة الاحتفالية */
+/* القصاصات الملونة */
 .confetti-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 2500; overflow: hidden; }
 .confetti-piece { position: absolute; opacity: 0.9; animation: fall 3s ease-out forwards; }
 @keyframes fall { 0% { transform: translateY(-50px) rotate(0deg); opacity: 1; } 100% { transform: translateY(100vh) rotate(720deg); opacity: 0; } }

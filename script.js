@@ -11,7 +11,7 @@ let selectedTileElement = null;
 let currentRound = 1;
 let score1 = 0;
 let score2 = 0;
-let countdown = null;
+let countdown;
 let timerSeconds = 0;
 
 let team1Color = '#71bf43';
@@ -20,22 +20,11 @@ let boardState = Array(5).fill(null).map(() => Array(5).fill(0));
 
 let peer = null;
 let peerId = '';
-let audioCtx = null;
 
-function initAudioContext() {
-  if (!audioCtx) {
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  }
-  if (audioCtx.state === 'suspended') {
-    audioCtx.resume();
-  }
-}
-
-window.addEventListener('click', initAudioContext, { once: true });
-
+// توليد الباركود تلقائياً في الشاشة الرئيسية
 window.addEventListener('DOMContentLoaded', () => {
   const qrElem = document.getElementById("gameQRCode");
-  if (qrElem && typeof QRCode !== 'undefined') {
+  if (qrElem) {
     qrElem.innerHTML = "";
     new QRCode(qrElem, {
       text: window.location.href,
@@ -48,7 +37,6 @@ window.addEventListener('DOMContentLoaded', () => {
 });
 
 function goToSettings() {
-  initAudioContext();
   document.getElementById('introScreen').classList.add('hidden');
   document.getElementById('settingsScreen').classList.remove('hidden');
 }
@@ -59,7 +47,6 @@ function openSettings() {
 }
 
 function startGame() {
-  initAudioContext();
   const t1Name = document.getElementById('team1NameInput').value || 'الفريق الأول';
   const t2Name = document.getElementById('team2NameInput').value || 'الفريق الثاني';
   team1Color = document.getElementById('team1ColorInput').value;
@@ -83,9 +70,8 @@ function startGame() {
   initPeerConnection();
 }
 
+/* ربط الهواتف عبر PeerJS بدون حاجة لسيرفر */
 function initPeerConnection() {
-  if (typeof Peer === 'undefined') return;
-  
   peerId = 'horof-' + Math.floor(1000 + Math.random() * 9000);
   peer = new Peer(peerId);
 
@@ -122,7 +108,7 @@ function handleBuzzerPress(teamNumber, playerName) {
 }
 
 function shuffle(array) {
-  return array.slice().sort(() => Math.random() - 0.5);
+  return array.sort(() => Math.random() - 0.5);
 }
 
 function initRound() {
@@ -178,9 +164,8 @@ function selectLetter(letter, element) {
   selectedTileElement = element;
   document.getElementById('currentLetterBadge').innerText = letter;
 
-  if (!element.classList.contains('team1') && !element.classList.contains('team2')) {
-    element.classList.add('selected');
-  }
+  // السماح بتحديد الخلية حتى لو كانت ملونة مسبقاً لتعديلها
+  element.classList.add('selected');
 
   document.getElementById('teamAssignButtons').style.display = 'flex';
   loadQuestion(letter);
@@ -192,139 +177,102 @@ function assignTileToTeam(teamNumber) {
   const r = parseInt(selectedTileElement.dataset.row);
   const c = parseInt(selectedTileElement.dataset.col);
 
+  // إزالة أي حالة سابقة للخلية وتحديث مصفوفة اللوحة
   selectedTileElement.classList.remove('selected', 'team1', 'team2');
+  boardState[r][c] = 0;
 
   if (teamNumber === 1) {
     selectedTileElement.classList.add('team1');
     boardState[r][c] = 1;
+    playVictorySound();
+    triggerConfetti();
+    checkWinningPath(1);
   } else if (teamNumber === 2) {
     selectedTileElement.classList.add('team2');
     boardState[r][c] = 2;
+    playVictorySound();
+    triggerConfetti();
+    checkWinningPath(2);
+  } else {
+    // إذا كان الخيار 0 (عند الضغط على زر 🔀 لتفريغ الخلية وإلغاء تلوينها للتعديل)
+    selectedTileElement.classList.remove('selected');
   }
-
-  playVictorySound();
-  triggerConfetti();
-  checkWinningPath(teamNumber);
 }
 
-/* خوارزميات فحص الفوز والربط الرأسي والأفقي المحدثة بالكامل */
+/* 🏆 خوارزمية فحص مسار الفوز الشاملة من جميع النواحي والزوايا والمسارات المتعرجة والطولية والعرضية */
 function checkWinningPath(team) {
-  let winningPath = [];
-
-  if (team === 1) {
-    winningPath = findVerticalWinningPath(team);
-  } else if (team === 2) {
-    winningPath = findHorizontalWinningPath(team);
-  }
-
-  if (winningPath.length > 0) {
+  if (checkAnyPath(team)) {
     const tName = team === 1 ? document.getElementById('team1NameInput').value : document.getElementById('team2NameInput').value;
-    
-    // إبراز خلايا مسار الفوز الموصل بتأثير التوهج
-    winningPath.forEach(([r, c]) => {
-      const hexSvg = document.querySelector(`.hex-svg[data-row="${r}"][data-col="${c}"]`);
-      if (hexSvg) {
-        hexSvg.classList.add('winning-path');
-      }
-    });
-
     addScore(team);
-    playPathVictorySound();
-    
-    setTimeout(() => {
-      showWinnerModal(tName);
-    }, 600);
+    showWinnerModal(tName);
   }
 }
 
-// تحديد الخلايا المجاورة للشبكة السداسية مع مراعاة إزاحة الصفوف الزوجية
+function checkAnyPath(team) {
+  // 1. فحص الاتصال من الحافة العلوية (الصف 0) إلى الحافة السفلية (الصف 4) بأي مسار (طولي، زاوي، أو متعرج)
+  let visitedTopToBottom = Array(5).fill(null).map(() => Array(5).fill(false));
+  let queueTopToBottom = [];
+
+  for (let c = 0; c < 5; c++) {
+    if (boardState[0][c] === team) {
+      queueTopToBottom.push([0, c]);
+      visitedTopToBottom[0][c] = true;
+    }
+  }
+
+  while (queueTopToBottom.length > 0) {
+    let [r, c] = queueTopToBottom.shift();
+    if (r === 4) return true;
+
+    for (let [nr, nc] of getHexNeighbors(r, c)) {
+      if (nr >= 0 && nr < 5 && nc >= 0 && nc < 5 && !visitedTopToBottom[nr][nc] && boardState[nr][nc] === team) {
+        visitedTopToBottom[nr][nc] = true;
+        queueTopToBottom.push([nr, nc]);
+      }
+    }
+  }
+
+  // 2. فحص الاتصال من الحافة اليمنى (العمود 4) إلى الحافة اليسرى (العمود 0) بأي مسار (عرضي، زاوي، أو متعرج)
+  let visitedLeftToRight = Array(5).fill(null).map(() => Array(5).fill(false));
+  let queueLeftToRight = [];
+
+  for (let r = 0; r < 5; r++) {
+    if (boardState[r][0] === team) {
+      queueLeftToRight.push([r, 0]);
+      visitedLeftToRight[r][0] = true;
+    }
+  }
+
+  while (queueLeftToRight.length > 0) {
+    let [r, c] = queueLeftToRight.shift();
+    if (c === 4) return true;
+
+    for (let [nr, nc] of getHexNeighbors(r, c)) {
+      if (nr >= 0 && nr < 5 && nc >= 0 && nc < 5 && !visitedLeftToRight[nr][nc] && boardState[nr][nc] === team) {
+        visitedLeftToRight[nr][nc] = true;
+        queueLeftToRight.push([nr, nc]);
+      }
+    }
+  }
+
+  return false;
+}
+
+// دالة تحديد الخلايا المجاورة بدقة للشبكة السداسية (Hexagon Grid Neighbors)
 function getHexNeighbors(r, c) {
-  const isEven = (r % 2 === 0);
-  if (isEven) {
+  if (r % 2 === 0) {
     return [
-      [r - 1, c - 1], [r - 1, c],
-      [r, c - 1],     [r, c + 1],
-      [r + 1, c - 1], [r + 1, c]
+      [r-1, c-1], [r-1, c], 
+      [r, c-1],   [r, c+1], 
+      [r+1, c-1], [r+1, c]
     ];
   } else {
     return [
-      [r - 1, c],     [r - 1, c + 1],
-      [r, c - 1],     [r, c + 1],
-      [r + 1, c],     [r + 1, c + 1]
+      [r-1, c],   [r-1, c+1], 
+      [r, c-1],   [r, c+1], 
+      [r+1, c],   [r+1, c+1]
     ];
   }
-}
-
-// مسار الفوز الرأسي للفريق الأول (من الصف 0 حتى الصف 4)
-function findVerticalWinningPath(team) {
-  for (let startCol = 0; startCol < 5; startCol++) {
-    if (boardState[0][startCol] === team) {
-      let visited = Array(5).fill(null).map(() => Array(5).fill(false));
-      let parentMap = {};
-      let queue = [[0, startCol]];
-      visited[0][startCol] = true;
-
-      while (queue.length > 0) {
-        let [r, c] = queue.shift();
-
-        if (r === 4) {
-          let path = [];
-          let curr = `${r},${c}`;
-          while (curr) {
-            let [pr, pc] = curr.split(',').map(Number);
-            path.push([pr, pc]);
-            curr = parentMap[curr];
-          }
-          return path;
-        }
-
-        for (let [nr, nc] of getHexNeighbors(r, c)) {
-          if (nr >= 0 && nr < 5 && nc >= 0 && nc < 5 && !visited[nr][nc] && boardState[nr][nc] === team) {
-            visited[nr][nc] = true;
-            parentMap[`${nr},${nc}`] = `${r},${c}`;
-            queue.push([nr, nc]);
-          }
-        }
-      }
-    }
-  }
-  return [];
-}
-
-// مسار الفوز الأفقي للفريق الثاني (من العمود 0 حتى العمود 4)
-function findHorizontalWinningPath(team) {
-  for (let startRow = 0; startRow < 5; startRow++) {
-    if (boardState[startRow][0] === team) {
-      let visited = Array(5).fill(null).map(() => Array(5).fill(false));
-      let parentMap = {};
-      let queue = [[startRow, 0]];
-      visited[startRow][0] = true;
-
-      while (queue.length > 0) {
-        let [r, c] = queue.shift();
-
-        if (c === 4) {
-          let path = [];
-          let curr = `${r},${c}`;
-          while (curr) {
-            let [pr, pc] = curr.split(',').map(Number);
-            path.push([pr, pc]);
-            curr = parentMap[curr];
-          }
-          return path;
-        }
-
-        for (let [nr, nc] of getHexNeighbors(r, c)) {
-          if (nr >= 0 && nr < 5 && nc >= 0 && nc < 5 && !visited[nr][nc] && boardState[nr][nc] === team) {
-            visited[nr][nc] = true;
-            parentMap[`${nr},${nc}`] = `${r},${c}`;
-            queue.push([nr, nc]);
-          }
-        }
-      }
-    }
-  }
-  return [];
 }
 
 function showWinnerModal(teamName) {
@@ -428,7 +376,7 @@ function nextRound() {
 
 function playVictorySound() {
   try {
-    initAudioContext();
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     [523.25, 659.25, 783.99].forEach((freq, index) => {
       const osc = audioCtx.createOscillator();
       const gain = audioCtx.createGain();
@@ -443,31 +391,12 @@ function playVictorySound() {
   } catch (e) {}
 }
 
-function playPathVictorySound() {
-  try {
-    initAudioContext();
-    const notes = [523.25, 659.25, 783.99, 1046.50, 1318.51, 1567.98];
-    notes.forEach((freq, index) => {
-      const osc = audioCtx.createOscillator();
-      const gain = audioCtx.createGain();
-      osc.type = 'triangle';
-      osc.frequency.value = freq;
-      gain.gain.setValueAtTime(0.3, audioCtx.currentTime + index * 0.1);
-      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + index * 0.1 + 0.4);
-      osc.connect(gain);
-      gain.connect(audioCtx.destination);
-      osc.start(audioCtx.currentTime + index * 0.1);
-      osc.stop(audioCtx.currentTime + index * 0.1 + 0.4);
-    });
-  } catch (e) {}
-}
-
 function triggerConfetti() {
   const container = document.getElementById('confettiContainer');
   container.innerHTML = '';
   const colors = ['#ffde00', '#00bcd4', '#71bf43', '#f58220', '#e91e63'];
 
-  for (let i = 0; i < 60; i++) {
+  for (let i = 0; i < 50; i++) {
     const piece = document.createElement('div');
     piece.className = 'confetti-piece';
     piece.style.left = Math.random() * 100 + '%';

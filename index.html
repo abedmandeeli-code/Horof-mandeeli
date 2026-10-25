@@ -6,20 +6,18 @@
   <title>حروف مع منديلي</title>
   <link rel="stylesheet" href="style.css">
   <link href="https://fonts.googleapis.com/css2?family=Changa:wght@700;800&display=swap" rel="stylesheet">
-  <!-- مكتبة توليد الـ QR Code -->
+  <!-- مكتبة توليد الـ QR Code تلقائياً -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-  <!-- مكتبة PeerJS للربط اللحظي -->
+  <!-- مكتبة PeerJS للربط اللحظي مع الهواتف بدون سيرفر -->
   <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
 </head>
 <body>
 
   <!-- 1. شاشة المقدمة -->
   <div id="introScreen" class="overlay-screen">
-    <div class="animated-bg-hexes"></div>
-
     <div class="intro-content">
       <div class="animated-logo">
-        <svg class="intro-hex glow-hex" viewBox="0 0 100 115">
+        <svg class="intro-hex" viewBox="0 0 100 115">
           <polygon points="50,5 95,30 95,85 50,110 5,85 5,30" />
           <text x="50%" y="55%" text-anchor="middle" dominant-baseline="middle">م</text>
         </svg>
@@ -27,6 +25,7 @@
       <h1 class="intro-title">حروف مع منديلي</h1>
       <p class="intro-subtitle">مسابقة الحروف والذكاء التفاعلية</p>
       
+      <!-- باركود الدخول للعبة -->
       <div class="qr-container">
         <p class="qr-label">امسح الباركود لفتح اللعبة على الهاتف:</p>
         <div id="gameQRCode" class="qr-box"></div>
@@ -42,7 +41,7 @@
       <h2>إعدادات الفرق والألوان</h2>
 
       <div class="team-config">
-        <h3>الفريق الأول (رأسي)</h3>
+        <h3>الفريق الأول</h3>
         <input type="text" id="team1NameInput" value="الفريق الأول" placeholder="اسم الفريق الأول">
         <div class="color-picker-group">
           <label>اختر اللون:</label>
@@ -51,7 +50,7 @@
       </div>
 
       <div class="team-config">
-        <h3>الفريق الثاني (أفقي)</h3>
+        <h3>الفريق الثاني</h3>
         <input type="text" id="team2NameInput" value="الفريق الثاني" placeholder="اسم الفريق الثاني">
         <div class="color-picker-group">
           <label>اختر اللون:</label>
@@ -63,12 +62,12 @@
     </div>
   </div>
 
-  <!-- 3. نافذة احتفالية الفوز المنبثقة (Modal) -->
+  <!-- 3. نافذة احتفالية الفوز والتوصيل -->
   <div id="winnerModal" class="overlay-screen hidden" style="z-index: 3000;">
     <div class="winner-card">
       <div class="trophy-icon">🏆</div>
       <h2 id="winnerTeamName">مبروك للفريق الفائز!</h2>
-      <p>تم توصيل المسار بنجاح واقتناص هذه الجولة!</p>
+      <p>تم إكمال المسار بنجاح واقتناص الجولة!</p>
       <button class="btn-start" onclick="closeWinnerModal()" style="margin-top: 15px;">استمرار 🚀</button>
     </div>
   </div>
@@ -89,11 +88,12 @@
         <div class="round-title" id="roundTitle">الجولة الأولى</div>
       </div>
 
+      <!-- حالة ربط كود الهاتف -->
       <div class="buzzer-status-card" id="buzzerStatusCard">
         <span id="roomCodeDisplay">كود ربط الهواتف: جاري الاتصال...</span>
       </div>
 
-      <!-- بطاقة السؤال -->
+      <!-- بطاقة السؤال الثابتة -->
       <div class="question-card">
         <div class="letter-badge" id="currentLetterBadge">؟</div>
         
@@ -107,6 +107,7 @@
           <button class="btn btn-new-question" id="newQuestionBtn" onclick="changeQuestion()" style="display:none;">سؤال جديد</button>
         </div>
 
+        <!-- أزرار تعيين الفريق + زر التعديل بالأيقونة الجديدة 🔀 -->
         <div class="team-assign-buttons" id="teamAssignButtons" style="display:none;">
           <button class="btn-assign" onclick="assignTileToTeam(1)">
             <span class="team-box-indicator t1-box"></span>
@@ -115,6 +116,9 @@
           <button class="btn-assign" onclick="assignTileToTeam(2)">
             <span class="team-box-indicator t2-box"></span>
             <span id="assignT2Label">الفريق الثاني</span>
+          </button>
+          <button class="btn-assign btn-reset-tile" onclick="assignTileToTeam(0)" title="تعديل أو إلغاء تلوين الخلية">
+            🔀
           </button>
         </div>
       </div>
