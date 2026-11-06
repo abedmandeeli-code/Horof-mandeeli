@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>حروف مع منديلي - 7rof</title>
-  <link rel="stylesheet" href="style.css?v=4" />
+  <link rel="stylesheet" href="style.css?v=5" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@500;700;900&display=swap" rel="stylesheet">
@@ -80,15 +80,6 @@
           </div>
         </div>
 
-        <div class="qr-card" id="gameQrCard" style="display:none;">
-          <div class="qr-card-text">
-            <div class="qr-card-title">انضم للغرفة</div>
-            <div class="qr-card-code" id="gameQrCode">------</div>
-            <div class="qr-card-hint">امسح الباركود بالجوال</div>
-          </div>
-          <div class="qr-card-img" id="gameQr"></div>
-        </div>
-
         <div class="players-panel" id="playersPanel">
           <div class="players-panel-title">اللاعبون <span id="playersCountTxt">0</span></div>
           <div class="player-bubbles" id="playerBubbles"></div>
@@ -107,17 +98,59 @@
     </div>
   </div>
 
-  <!-- شاشة اللاعب (زر الضغط) -->
+  <!-- شاشة اللاعب -->
   <div id="playerScreen" class="player-screen">
-    <div class="player-top">
-      <div class="player-name-tag" id="pScreenName">—</div>
-      <div class="player-team-tag" id="pScreenTeam">—</div>
+    <div id="pLobby" class="p-view p-lobby">
+      <div class="brand p-brand"><span class="b1">حروف</span><span class="b2">مع</span><span class="b3">منديلي</span></div>
+      <div class="p-card">
+        <div class="room-section-header"><span>اللاعبين</span><span id="pLobbyCount">0/50</span></div>
+        <div class="room-players-list" id="pLobbyPlayers"></div>
+      </div>
+      <div class="p-card">
+        <div class="room-section-header"><span>إعدادات اللعبة</span></div>
+        <div class="pl-readonly" id="pSettings"></div>
+      </div>
+      <p class="p-wait">بانتظار المنظم ليبدأ اللعبة...</p>
+      <button class="btn btn-secondary btn-full" onclick="playerLeave()">خروج من الغرفة</button>
     </div>
-    <div class="buzzer-wrap">
-      <button class="buzzer" id="buzzerBtn" onclick="playerPress()"><span id="buzzerLabel"></span></button>
-      <div class="buzzer-status" id="buzzerStatus">جاهز</div>
+
+    <div id="pRound" class="p-view p-round"><h1 class="round-title-main" id="pRoundTitle"></h1></div>
+
+    <div id="pGame" class="p-view p-game">
+      <div class="p-top">
+        <div class="brand"><span class="b1">حروف</span><span class="b2">مع</span><span class="b3">منديلي</span></div>
+        <div class="p-top-btns">
+          <button class="top-btn" onclick="openHowToPlay()">شرح اللعب</button>
+          <button class="top-btn" id="pSoundBtn" onclick="toggleSound()">كتم أصوات اللعبة 🔊</button>
+        </div>
+      </div>
+      <div class="p-mid">
+        <div class="p-board" id="pBoard"></div>
+        <div class="p-others" id="pOthers"></div>
+        <div class="p-score">
+          <div class="score-header"><span>نتائج الجولات</span><span class="round-badge-text" id="pRoundBadge"></span></div>
+          <div class="score-teams-row">
+            <div class="score-box green-score"><span class="team-name">الأخضر</span><span class="score-num" id="pGreenScore">0</span></div>
+            <div class="score-box orange-score"><span class="team-name">البرتقالي</span><span class="score-num" id="pOrangeScore">0</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="p-buzzer-area">
+        <div class="buzzer-holder" id="buzzerHolder">
+          <button class="buzzer" id="buzzerBtn" onclick="playerPress()"><span id="buzzerLabel"></span></button>
+          <span class="pts-badge" id="buzzerPts">0</span>
+        </div>
+        <div class="p-myname" id="pMyName"></div>
+        <div class="buzzer-status" id="buzzerStatus">جاهز</div>
+        <button class="btn btn-secondary leave-btn" onclick="playerLeave()">خروج</button>
+      </div>
     </div>
-    <button class="btn btn-secondary leave-btn" onclick="playerLeave()">خروج من الغرفة</button>
+
+    <div id="pFinal" class="p-view p-final">
+      <h2 class="win-title" id="pFinalTitle"></h2>
+      <p class="win-subtitle" id="pFinalSub"></p>
+      <button class="btn btn-secondary" onclick="playerLeave()">خروج</button>
+    </div>
   </div>
 
   <!-- نافذة بنك الأسئلة التمهيدية -->
@@ -322,7 +355,7 @@
 
           <div class="setting-group">
             <label class="setting-label">اسم المنظم:</label>
-            <input type="text" id="organizerName" class="form-input" placeholder="أدخل اسم المنظم" />
+            <input type="text" id="organizerName" class="form-input" placeholder="أدخل اسم المنظم" oninput="broadcastState()" />
           </div>
 
           <div class="setting-group">
@@ -432,6 +465,10 @@
           </ul>
         </div>
         <div class="section-block">
+          <h3 class="section-title">⚠️ خروج لاعب أو انقطاعه:</h3>
+          <p class="section-text">عند خروج أي لاعب من الموقع أو اللعبة (أو انقطاع إنترنته) يتحول زره إلى <strong>اللون الرمادي</strong> عند المنظم وعند جميع اللاعبين مع صوت تنبيه مميز. يستطيع العودة خلال <strong>10 ثوانٍ</strong> بنفس اسمه وفريقه، وإن لم يعد خلالها يُطرد من اللعبة.</p>
+        </div>
+        <div class="section-block">
           <h3 class="section-title">👥 إدارة اللاعبين:</h3>
           <p class="section-text">اضغط على زر أي لاعب (بدون تحديد حرف) لتظهر قائمة تتيح لك طرده أو تغيير فريقه، ويظهر زره بأحد الشكلين:</p>
           <div class="teams-display-row">
@@ -454,6 +491,10 @@
           <div class="buzzer-explain-item"><div class="buzzer-icon-wrap"><div class="bz-circle bz-red"></div></div><p><strong>اللون الأحمر:</strong> انتهى الوقت المخصص للإجابة.</p></div>
           <div class="buzzer-explain-item"><div class="buzzer-icon-wrap"><div class="bz-circle bz-white-num">10</div></div><p><strong>الزر الأبيض (10):</strong> فرصة ثانية! عندما يفتحها المنظم يمكن للفريق الآخر الضغط، ويبدأ عدّاد 10 ثوانٍ لأول من يضغط منهم.</p></div>
         </div>
+        <div class="section-block">
+          <h3 class="section-title">⚠️ إذا خرجت من اللعبة:</h3>
+          <p class="section-text">يتحول زرك إلى اللون الرمادي عند الجميع مع صوت تنبيه، ولديك 10 ثوانٍ للعودة بنفس الاسم وإلا تُطرد من اللعبة.</p>
+        </div>
       </div>
       <button class="btn btn-secondary btn-full close-btn" onclick="closeHowToPlay()">إغلاق الشرح</button>
     </div>
@@ -467,8 +508,8 @@
   <div id="countdownBox" class="countdown" style="display:none;"></div>
   <div id="toast" class="toast"></div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
-<script src="questions.js?v=4"></script>
-<script src="script.js?v=4"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
+  <script src="questions.js?v=5"></script>
+  <script src="script.js?v=5"></script>
 </body>
 </html>

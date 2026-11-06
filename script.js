@@ -57,6 +57,14 @@ function playSound(type) {
       gain.gain.setValueAtTime(0.18, t);
       gain.gain.exponentialRampToValueAtTime(0.001, t + 0.65);
       osc.start(); osc.stop(t + 0.65);
+    } else if (type === "leave") {
+      osc.type = "triangle";
+      osc.frequency.setValueAtTime(520, t);
+      osc.frequency.setValueAtTime(390, t + 0.14);
+      osc.frequency.setValueAtTime(260, t + 0.28);
+      gain.gain.setValueAtTime(0.18, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.5);
+      osc.start(); osc.stop(t + 0.5);
     } else if (type === "second") {
       osc.type = "triangle";
       osc.frequency.setValueAtTime(660, t);
@@ -76,7 +84,9 @@ function playSound(type) {
 
 function toggleSound() {
   soundEnabled = !soundEnabled;
-  $("soundToggleBtn").textContent = soundEnabled ? "كتم أصوات اللعبة 🔊" : "تشغيل الأصوات 🔇";
+  const label = soundEnabled ? "كتم أصوات اللعبة 🔊" : "تشغيل الأصوات 🔇";
+  $("soundToggleBtn").textContent = label;
+  if ($("pSoundBtn")) $("pSoundBtn").textContent = label;
   playSound("click");
 }
 
@@ -94,15 +104,19 @@ const G = {
 const R = {            // حالة المنظم / الغرفة
   code: null, ch: null, tick: null, url: "",
   players: {}, kicked: new Set(),
-  phase: "ready", winnerId: null, secondTeam: null, deadline: 0, chainDone: false,
+  phase: "ready", winnerId: null, firstTeam: null, secondTeam: null, deadline: 0, total: 0,
+  screen: "lobby", roundText: "", finalTitle: "", finalSub: "",
   menuPlayerId: null, lastBroadcast: 0
 };
 
 const P = {            // حالة اللاعب
-  id: null, name: "", team: "green", ch: null, state: null, joined: false, timer: null, lastPhase: null
+  id: null, name: "", team: "green", ch: null, state: null, joined: false, timer: null, pingTimer: null, lastPhase: null, stage: 0, room: null, prevOffline: new Set(), boardSig: ""
 };
 
 let selectedJoinTeam = "green";
+function loadSession() { try { return JSON.parse(sessionStorage.getItem("7rof_player") || "null"); } catch (e) { return null; } }
+function saveSession() { try { sessionStorage.setItem("7rof_player", JSON.stringify({ room: P.room, id: P.id, name: P.name, team: P.team })); } catch (e) { /* ignore */ } }
+function clearSession() { try { sessionStorage.removeItem("7rof_player"); } catch (e) { /* ignore */ } }
 
 /* =====================  البداية  ===================== */
 document.addEventListener("DOMContentLoaded", () => {
@@ -114,7 +128,14 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   const params = new URLSearchParams(location.search);
   const room = params.get("room");
-  if (room) { $("roomCode").value = room.toUpperCase(); openJoinRoom(); }
+  if (room) {
+    $("roomCode").value = room.toUpperCase();
+    const sv = loadSession();
+    if (sv && sv.room === room.toUpperCase()) {            // عودة لاعب بنفس الهوية
+      $("playerName").value = sv.name; selectedJoinTeam = sv.team;
+      openJoinRoom(); enterGame({ preventDefault() {} });
+    } else openJoinRoom();
+  }
   else if (params.get("qb")) { setTimeout(enterQuestionBankApp, 50); }
   document.addEventListener("click", () => { if (audioCtx && audioCtx.state === "suspended") audioCtx.resume(); }, { once: true });
 });
@@ -132,18 +153,25 @@ const PEER_OPTS = { config: { iceServers: [
 
 function makeOrganizerChannel(code) {
   if (typeof Peer === "undefined") return new BroadcastChannel("7rof_" + code);
-  const conns = new Set();
+  const conns = new Set(), latest = {};
   const ch = {
-    onmessage: null,
+    onmessage: null, onleave: null,
     postMessage(m) { conns.forEach(c => { if (c.open) { try { c.send(m); } catch (e) { /* ignore */ } } }); },
     close() { try { peer.destroy(); } catch (e) { /* ignore */ } }
   };
   const peer = new Peer("7rof-" + code, PEER_OPTS);
   peer.on("connection", c => {
     conns.add(c);
-    c.on("data", d => { if (ch.onmessage) ch.onmessage({ data: d }); });
-    c.on("close", () => conns.delete(c));
+    c.on("data", d => {
+      if (d && d.id) { c.playerId = d.id; latest[d.id] = c; }
+      if (ch.onmessage) ch.onmessage({ data: d });
+    });
+    c.on("close", () => {
+      conns.delete(c);
+      if (c.playerId && latest[c.playerId] === c && ch.onleave) ch.onleave(c.playerId);
+    });
   });
+  peer.on("disconnected", () => { try { peer.reconnect(); } catch (e) { /* ignore */ } });
   peer.on("error", e => {
     if (e.type === "unavailable-id") toast("رمز الغرفة مستخدم، أغلق الغرفة وأنشئ غرفة جديدة");
     else toast("مشكلة اتصال بخادم الغرفة: " + e.type);
@@ -151,21 +179,54 @@ function makeOrganizerChannel(code) {
   return ch;
 }
 
+function joinStatus(msg, bad) {
+  const el = $("joinStatus");
+  if (!el) return;
+  el.textContent = msg || "";
+  el.style.color = bad ? "#ff8a95" : "#bdf5c8";
+}
+
+function peerErrorText(e) {
+  switch (e.type) {
+    case "peer-unavailable": return "✗ الغرفة غير موجودة أو أُغلقت — تأكد من الرمز (أحرف كبيرة وأرقام) وأن المنظم لم يحدّث صفحته.";
+    case "network": case "server-error": case "socket-error": case "socket-closed":
+      return "✗ تعذّر الوصول لخادم الاتصال (" + e.type + "). تحقق من الإنترنت، وأوقف VPN أو حاجب الإعلانات أو وضع توفير البيانات.";
+    case "browser-incompatible": return "✗ هذا المتصفح لا يدعم الاتصال المباشر. جرّب Chrome أو Safari.";
+    default: return "✗ خطأ اتصال: " + e.type;
+  }
+}
+
 function makePlayerChannel(code) {
-  if (typeof Peer === "undefined") return new BroadcastChannel("7rof_" + code);
+  if (typeof Peer === "undefined") { joinStatus("✗ لم تُحمَّل مكتبة الاتصال. تحقق من الإنترنت وحدّث الصفحة.", true); return new BroadcastChannel("7rof_" + code); }
   const queue = []; let conn = null;
+  P.stage = 0;
   const ch = {
     onmessage: null,
     postMessage(m) { if (conn && conn.open) conn.send(m); else queue.push(m); },
     close() { try { peer.destroy(); } catch (e) { /* ignore */ } }
   };
+  joinStatus("… جاري الاتصال بخادم الغرف");
   const peer = new Peer(undefined, PEER_OPTS);
   peer.on("open", () => {
+    P.stage = 1;
+    joinStatus("✓ تم الاتصال بالخادم … جاري الاتصال بالمنظم");
     conn = peer.connect("7rof-" + code, { reliable: true });
-    conn.on("open", () => queue.splice(0).forEach(m => conn.send(m)));
+    conn.on("open", () => {
+      P.stage = 2;
+      joinStatus("✓ تم الاتصال بالمنظم … جاري التسجيل");
+      queue.splice(0).forEach(m => conn.send(m));
+    });
     conn.on("data", d => { if (ch.onmessage) ch.onmessage({ data: d }); });
+    conn.on("error", e => joinStatus(peerErrorText(e), true));
+    setTimeout(() => {
+      const pc = conn && conn.peerConnection;
+      if (pc) pc.oniceconnectionstatechange = () => {
+        if (pc.iceConnectionState === "failed") joinStatus("✗ فشل الاتصال المباشر بالمنظم بسبب الشبكة. جرّب نفس شبكة الواي فاي التي عليها المنظم، وأوقف VPN.", true);
+      };
+    }, 300);
   });
-  peer.on("error", e => toast(e.type === "peer-unavailable" ? "الغرفة غير موجودة أو أُغلقت — تأكد من الرمز" : "مشكلة اتصال: " + e.type));
+  peer.on("disconnected", () => { try { peer.reconnect(); } catch (e) { /* ignore */ } });
+  peer.on("error", e => joinStatus(peerErrorText(e), true));
   return ch;
 }
 
@@ -192,6 +253,8 @@ function createRoom() {
   if (location.protocol === "file:") toast("افتح الموقع من رابط الاستضافة (GitHub Pages) ليعمل الباركود على جوالات اللاعبين");
   R.ch = makeOrganizerChannel(R.code);
   R.ch.onmessage = e => onOrganizerMessage(e.data);
+  R.ch.onleave = id => markOffline(id);
+  R.screen = "lobby";
   R.tick = setInterval(organizerTick, 250);
 }
 
@@ -247,15 +310,18 @@ function selectOption(id) {
   playSound("click");
   setActive(["mode1", "mode2", "mode3"], id);
   G.mode = id === "mode1" ? "both" : id === "mode2" ? "buttons" : "cells";
+  broadcastState();
 }
 function selectGrid(id) {
   playSound("click");
   setActive(["grid3", "grid4", "grid5"], id);
   G.size = id === "grid3" ? 3 : id === "grid4" ? 4 : 5;
+  broadcastState();
 }
 function selectRound(n) {
   playSound("click");
   G.target = n;
+  broadcastState();
   setActive(["round1", "round2", "round3", "round5"], n === 5 ? "round5" : n === 3 ? "round1" : n === 2 ? "round2" : "round3");
 }
 
@@ -267,6 +333,7 @@ function startGame() {
   hide("mainMenuCard");
   G.score = { green: 0, orange: 0 };
   G.round = 1;
+  Object.values(R.players).forEach(p => { p.points = 0; });
   updateScoreUI();
   applyModeLayout();
   resetBuzzState();
@@ -274,20 +341,7 @@ function startGame() {
   showRoundTransitionScreen();
 }
 
-function renderGameQr() {
-  const card = $("gameQrCard");
-  if (!R.code || G.mode === "cells") { card.style.display = "none"; return; }
-  card.style.display = "flex";
-  $("gameQrCode").textContent = R.code;
-  const el = $("gameQr");
-  el.innerHTML = "";
-  if (typeof QRCode !== "undefined") {
-    new QRCode(el, { text: R.url, width: 104, height: 104, colorDark: "#3b195c", colorLight: "#ffffff", correctLevel: QRCode.CorrectLevel.H });
-  }
-}
-
 function applyModeLayout() {
-  renderGameQr();
   $("boardFrame").style.display = G.mode === "buttons" ? "none" : "flex";
   $("playersPanel").style.display = G.mode === "cells" ? "none" : "block";
   $("scoreHint").style.display = G.mode === "buttons" ? "none" : "block";
@@ -298,12 +352,15 @@ function applyModeLayout() {
 function updateScoreUI() {
   $("greenScoreVal").textContent = G.score.green;
   $("orangeScoreVal").textContent = G.score.orange;
+  broadcastState();
 }
 
 function showRoundTransitionScreen() {
   $("roundTitleText").textContent = `الجولة ${ROUND_NAMES[G.round] || G.round}`;
   show("roundTransitionScreen");
   hide("gameScreen");
+  R.screen = "round"; R.roundText = $("roundTitleText").textContent;
+  broadcastState();
 }
 
 function startActualRound() {
@@ -312,6 +369,8 @@ function startActualRound() {
   show("gameScreen");
   $("currentRoundBadge").textContent = `الجولة ${ROUND_NAMES[G.round] || G.round}`;
   buildHexGrid(G.size);
+  R.screen = "game";
+  broadcastState();
 }
 
 /* =====================  الخلية السداسية  ===================== */
@@ -359,6 +418,7 @@ function setSelection(sel) {
   if (old) refreshCell(old.r, old.c);
   if (sel) refreshCell(sel.r, sel.c);
   document.body.classList.toggle("has-selection", !!sel);
+  broadcastState();
 }
 
 function onCellClick(r, c) {
@@ -368,16 +428,22 @@ function onCellClick(r, c) {
 }
 
 /* تلوين الخلية المحددة لفريق */
-function colorSelectedCell(team) {
+function colorSelectedCell(team, pid) {
   if (!G.sel) { toast("اختر حرفاً من الخلية أولاً بالضغط عليه"); return; }
   playSound("score");
   const { r, c } = G.sel;
-  G.history.push({ r, c, prev: G.grid[r][c].state, team });
+  // النقطة للاعب: الذي اخترته، أو الذي ضغط الزر أولاً إن كان من نفس الفريق
+  let credit = pid || null;
+  if (!credit && R.phase !== "ready" && R.players[R.winnerId] && R.players[R.winnerId].team === team) credit = R.winnerId;
+  if (credit && R.players[credit]) R.players[credit].points = (R.players[credit].points || 0) + 1; else credit = null;
+  G.history.push({ r, c, prev: G.grid[r][c].state, team, pid: credit });
   G.grid[r][c].state = team;
   setSelection(null);
   refreshCell(r, c);
   const el = cellEl(r, c);
   if (el) el.classList.add("pulse");
+  renderPlayersPanel();
+  broadcastState();
 
   if (checkWin(team)) {
     G.pendingWinner = team;
@@ -442,8 +508,11 @@ function cancelLastMove() {
   if (last) {
     G.grid[last.r][last.c].state = last.prev;
     refreshCell(last.r, last.c);
+    if (last.pid && R.players[last.pid]) R.players[last.pid].points = Math.max(0, (R.players[last.pid].points || 0) - 1);
+    renderPlayersPanel();
   }
   G.pendingWinner = null;
+  broadcastState();
 }
 
 function saveAndNextRound() {
@@ -459,6 +528,8 @@ function saveAndNextRound() {
     $("finalTitle").style.color = team === "green" ? "#5be37d" : "#ff9a1f";
     $("finalSub").textContent = `النتيجة النهائية: الأخضر ${G.score.green} - البرتقالي ${G.score.orange}`;
     show("finalModal");
+    R.screen = "final"; R.finalTitle = $("finalTitle").textContent; R.finalSub = $("finalSub").textContent;
+    broadcastState();
     return;
   }
   G.round++;
@@ -485,6 +556,7 @@ function executeClear(redistribute) {
     G.sel = null; G.history = []; G.pendingWinner = null;
     document.body.classList.remove("has-selection");
     G.grid.forEach((row, r) => row.forEach((cell, c) => { cell.state = "normal"; refreshCell(r, c); }));
+    broadcastState();
   }
 }
 
@@ -492,9 +564,11 @@ function backToRoom() {
   playSound("click");
   hide("gameScreen"); hide("roundTransitionScreen"); hide("winModal");
   document.body.classList.remove("has-selection");
+  R.screen = "lobby"; resetBuzzState();
   G.score = { green: 0, orange: 0 }; G.round = 1; updateScoreUI();
   show("mainMenuCard", "block");
   if (R.code) { renderRoomModal(); show("createRoomModal"); }
+  broadcastState();
 }
 
 /* =====================  البازر: حالة المنظم  =====================
@@ -516,41 +590,72 @@ function resetButtons() {
   organizerUpdate();
 }
 
-/* إعادة ضبط +10ث: يفتح المجال للفريق الآخر (العدّاد يبدأ عند ضغط أحد لاعبيه) */
+/* إعادة ضبط +10ث: يبدأ عدّاد 10 ثوانٍ تلقائياً للفريق الآخر فقط، ولأي لاعب منهم أن يضغط ويجيب */
 function resetSecondChance() {
   playSound("click");
   if ((R.phase !== "answering" && R.phase !== "expired") || !R.firstTeam) {
-    toast("اضغط أولاً على إعادة ضبط الأزرار، ثم انتظر ضغط فريق");
+    toast("تُستخدم بعد أن يضغط لاعب من الفريق الأول");
     return;
   }
   R.secondTeam = R.firstTeam === "green" ? "orange" : "green";
-  R.phase = "second"; R.deadline = 0; R.total = 0;
+  R.phase = "second"; R.total = SECOND_SECONDS * 1000; R.deadline = Date.now() + R.total;
   playSound("second");
   organizerUpdate();
 }
 
-function startAnswering(id, second) {
+function startAnswering(id) {          // الفريق الأول: 3 ثوانٍ
   const p = R.players[id];
-  R.winnerId = id;
-  if (second) { R.phase = "answering2"; R.total = SECOND_SECONDS * 1000; }
-  else { R.phase = "answering"; R.firstTeam = p.team; R.secondTeam = null; R.total = ANSWER_SECONDS * 1000; }
-  R.deadline = Date.now() + R.total;
+  R.winnerId = id; R.phase = "answering"; R.firstTeam = p.team; R.secondTeam = null;
+  R.total = ANSWER_SECONDS * 1000; R.deadline = Date.now() + R.total;
   playSound("buzz");
   organizerUpdate();
 }
 
 function handlePress(id) {
   const p = R.players[id];
+  if (!p || p.offlineAt) return;
+  if (R.phase === "ready") startAnswering(id);
+  else if (R.phase === "second" && p.team === R.secondTeam) {
+    // عدّاد الـ10 ثوانٍ يستمر دون إعادة تشغيل؛ هذا اللاعب هو من يجيب
+    R.winnerId = id; R.phase = "answering2";
+    playSound("buzz");
+    organizerUpdate();
+  }
+}
+
+/* ===== الحضور: انقطاع لاعب => رمادي 10 ثوانٍ ثم يُطرد ===== */
+const RETURN_GRACE_MS = 10000, HEARTBEAT_TIMEOUT_MS = 6000;
+
+function markOffline(id) {
+  const p = R.players[id];
+  if (!p || p.offlineAt) return;
+  p.offlineAt = Date.now(); p.lastSeen = 0;
+  playSound("leave");
+  toast("⚠ " + p.name + " غادر — لديه 10 ثوانٍ للعودة");
+  organizerUpdate();
+}
+
+function touchPlayer(id) {
+  const p = R.players[id];
   if (!p) return;
-  if (R.phase === "ready") startAnswering(id, false);
-  else if (R.phase === "second" && p.team === R.secondTeam) startAnswering(id, true);
+  p.lastSeen = Date.now();
+  if (p.offlineAt) { p.offlineAt = null; playSound("click"); toast("✓ عاد " + p.name); organizerUpdate(); }
 }
 
 function organizerTick() {
   const now = Date.now();
   let changed = false;
+  Object.values(R.players).forEach(p => {
+    if (!p.offlineAt && p.lastSeen && now - p.lastSeen > HEARTBEAT_TIMEOUT_MS) { markOffline(p.id); }
+    else if (p.offlineAt && now - p.offlineAt > RETURN_GRACE_MS) {
+      R.kicked.add(p.id); delete R.players[p.id];
+      if (R.winnerId === p.id) R.winnerId = null;
+      playSound("leave"); toast("🚪 تم طرد " + p.name + " لعدم العودة");
+      changed = true;
+    }
+  });
   if (R.phase === "answering" && now > R.deadline) { playSound("bell"); R.phase = "expired"; changed = true; }
-  else if (R.phase === "answering2" && now > R.deadline) { playSound("bell"); R.phase = "closed"; changed = true; }
+  else if ((R.phase === "second" || R.phase === "answering2") && now > R.deadline) { playSound("bell"); R.phase = "closed"; changed = true; }
   if (changed) organizerUpdate();
   else if (now - R.lastBroadcast > 1000) broadcastState();
 }
@@ -561,14 +666,26 @@ function organizerUpdate() {
   broadcastState();
 }
 
+function gameSnapshot() {
+  return {
+    screen: R.screen, roundText: R.roundText, finalTitle: R.finalTitle, finalSub: R.finalSub,
+    round: G.round, score: G.score, mode: G.mode, size: G.size, target: G.target,
+    organizer: ($("organizerName") && $("organizerName").value.trim()) || "المنظم",
+    grid: G.grid.map(r => r.map(c => c.letter + "|" + c.state[0])), sel: G.sel
+  };
+}
+
 function broadcastState() {
   if (!R.ch) return;
   R.lastBroadcast = Date.now();
-  const w = R.players[R.winnerId];
+  const w = R.players[R.winnerId], now = Date.now();
   R.ch.postMessage({
-    t: "state", room: R.code, players: Object.values(R.players), kicked: [...R.kicked],
+    t: "state", room: R.code,
+    players: Object.values(R.players).map(p => ({ id: p.id, name: p.name, team: p.team, points: p.points || 0, offline: !!p.offlineAt })),
+    kicked: [...R.kicked],
     phase: R.phase, winnerId: R.winnerId, winnerName: w ? w.name : "", firstTeam: R.firstTeam, secondTeam: R.secondTeam,
-    total: R.total, remain: Math.max(0, R.deadline - Date.now())   // المتبقي بدل الوقت المطلق (اختلاف ساعات الأجهزة)
+    total: R.total, remain: Math.max(0, R.deadline - now),
+    game: gameSnapshot()
   });
 }
 
@@ -576,19 +693,23 @@ function onOrganizerMessage(m) {
   if (!m) return;
   if (m.t === "join") {
     if (R.kicked.has(m.id)) { broadcastState(); return; }
-    if (!R.players[m.id] && Object.keys(R.players).length >= MAX_PLAYERS) return;
-    const isNew = !R.players[m.id];
-    R.players[m.id] = { id: m.id, name: String(m.name).slice(0, 14), team: m.team === "orange" ? "orange" : "green" };
-    if (isNew) playSound("click");
+    const existing = R.players[m.id];
+    if (!existing && Object.keys(R.players).length >= MAX_PLAYERS) return;
+    R.players[m.id] = { id: m.id, name: String(m.name).slice(0, 14), team: m.team === "orange" ? "orange" : "green",
+                        points: existing ? existing.points || 0 : 0, lastSeen: Date.now(), offlineAt: null };
+    if (!existing) playSound("click");
+    else if (existing.offlineAt) { playSound("click"); toast("✓ عاد " + existing.name); }
     organizerUpdate();
-  } else if (m.t === "press") handlePress(m.id);
-  else if (m.t === "leave") { delete R.players[m.id]; organizerUpdate(); }
+  } else if (m.t === "ping") touchPlayer(m.id);
+  else if (m.t === "press") { touchPlayer(m.id); handlePress(m.id); }
+  else if (m.t === "leave") markOffline(m.id);
 }
 
 /* حالة زر لاعب بحسب حالة الغرفة (تُستخدم عند المنظم واللاعب) */
 function stateDeadline(state) { return state.localDeadline !== undefined ? state.localDeadline : state.deadline; }
 
 function buzzStateFor(state, p, now) {
+  if (p.offline || p.offlineAt) return { cls: "gray", label: "", text: "غير متصل", canPress: false };
   const mine = state.winnerId === p.id;
   const secs = Math.max(0, Math.ceil((stateDeadline(state) - now) / 1000));
   switch (state.phase) {
@@ -601,7 +722,7 @@ function buzzStateFor(state, p, now) {
       ? { cls: "red", label: "", text: "انتهى وقتك — مقفل حتى يسمح المنظم", canPress: false }
       : { cls: "orange", label: "", text: "مقفل — بانتظار المنظم", canPress: false };
     case "second":
-      if (p.team === state.secondTeam) return { cls: "white", label: "10", text: "فرصة ثانية! اضغط للإجابة (10 ثوانٍ)", canPress: true };
+      if (p.team === state.secondTeam) return { cls: "white", label: String(secs), text: "فرصة ثانية! اضغط للإجابة قبل انتهاء العدّاد", canPress: true };
       return mine ? { cls: "red", label: "", text: "مقفل", canPress: false } : { cls: "orange", label: "", text: "مقفل", canPress: false };
     case "closed": return { cls: "red", label: "", text: "انتهى الوقت", canPress: false };
   }
@@ -619,13 +740,15 @@ function renderPlayersPanel() {
     const b = buzzStateFor(st, p, now);
     const btn = document.createElement("button");
     btn.className = `pb team-${p.team}` + (b.mic ? " is-first" : "");
-    btn.innerHTML = `<div class="pb-circle st-${b.cls}">${b.mic ? MIC_SVG : b.label}</div><span class="pb-name">${escapeHtml(p.name)}</span>`;
+    const offSecs = p.offlineAt ? Math.max(0, Math.ceil((RETURN_GRACE_MS - (now - p.offlineAt)) / 1000)) : 0;
+    btn.innerHTML = `<div class="pb-circle st-${b.cls}">${b.mic ? MIC_SVG : (p.offlineAt ? offSecs : b.label)}</div>` +
+      (p.points ? `<span class="pb-pts">${p.points}</span>` : "") + `<span class="pb-name">${escapeHtml(p.name)}</span>`;
     btn.onclick = () => onPlayerBubbleClick(p.id);
     $("playerBubbles").appendChild(btn);
   });
 }
 
-setInterval(() => { if (R.code && (R.phase === "answering" || R.phase === "answering2")) renderPlayersPanel(); }, 300);
+setInterval(() => { if (R.code && (R.phase === "answering" || R.phase === "second" || R.phase === "answering2" || Object.values(R.players).some(p => p.offlineAt))) renderPlayersPanel(); }, 300);
 
 /* =====================  العدّاد الظاهر للجميع  =====================
    الثلاث ثوانٍ: حلقة متدرجة (فيديو 1) — العشر ثوانٍ: ساعة إيقاف (فيديو 2) */
@@ -664,12 +787,12 @@ function renderCountdown() {
   } else if (R.code && $("gameScreen").style.display === "flex") {
     st = { phase: R.phase, deadline: R.deadline, total: R.total, name: (R.players[R.winnerId] || {}).name };
   }
-  if (!st || (st.phase !== "answering" && st.phase !== "answering2")) { box.style.display = "none"; return; }
+  if (!st || (st.phase !== "answering" && st.phase !== "second" && st.phase !== "answering2")) { box.style.display = "none"; return; }
   const remain = Math.max(0, st.deadline - Date.now());
   const frac = Math.min(1, remain / (st.total || 1));
   const secs = Math.ceil(remain / 1000);
   box.style.display = "flex";
-  const name = st.name ? `<div class="cd-name">${MIC_SVG}<span>${escapeHtml(st.name)}</span></div>` : "";
+  const name = (st.name && st.phase !== "second") ? `<div class="cd-name">${MIC_SVG}<span>${escapeHtml(st.name)}</span></div>` : "";
   box.innerHTML = (st.phase === "answering" ? ringSvg(frac, secs) : watchSvg(frac, secs)) + name;
 }
 setInterval(renderCountdown, 100);
@@ -677,7 +800,7 @@ setInterval(renderCountdown, 100);
 function onPlayerBubbleClick(id) {
   const p = R.players[id];
   if (!p) return;
-  if (G.sel) { colorSelectedCell(p.team); return; }   // أثناء تحديد حرف: احتساب النقطة لفريقه
+  if (G.sel) { colorSelectedCell(p.team, id); return; }   // أثناء تحديد حرف: احتساب النقطة لفريقه
   R.menuPlayerId = id;
   $("playerMenuName").textContent = p.name;
   show("playerMenuModal");
@@ -712,18 +835,21 @@ function enterGame(event) {
   const name = $("playerName").value.trim();
   if (!code || !name) return;
 
-  P.id = P.id || uid(); P.name = name; P.team = selectedJoinTeam; P.joined = false; P.state = null;
+  const sv = loadSession();
+  P.id = (sv && sv.room === code && sv.id) ? sv.id : uid();
+  P.room = code; P.name = name; P.team = selectedJoinTeam; P.joined = false; P.state = null;
   if (P.ch) P.ch.close();
   P.ch = makePlayerChannel(code);
   P.ch.onmessage = e => onPlayerMessage(e.data);
   sendJoin();
-  toast("جاري الاتصال بالغرفة...");
   setTimeout(() => {
     if (!P.joined) {
-      toast("لم يتم العثور على الغرفة، تأكد من الرمز");
+      if (P.stage === 0) joinStatus("✗ لم يصل الجوال إلى خادم الاتصال خلال 12 ثانية. تحقق من الإنترنت وأوقف VPN/حاجب الإعلانات، ثم حدّث الصفحة وجرّب مرة أخرى.", true);
+      else if (P.stage === 1) joinStatus("✗ وصل الجوال للخادم لكن لم يتصل بالمنظم. غالباً بسبب الشبكة: جرّب نفس واي فاي المنظم (لا بيانات الجوال)، أو تأكد من الرمز.", true);
+      else joinStatus("✗ اتصل بالمنظم لكن لم يُسجَّل. اضغط دخول مرة أخرى.", true);
       if (P.ch) { P.ch.close(); P.ch = null; }
     }
-  }, 8000);
+  }, 12000);
 }
 
 function sendJoin() { if (P.ch) P.ch.postMessage({ t: "join", id: P.id, name: P.name, team: P.team }); }
@@ -732,38 +858,98 @@ function onPlayerMessage(m) {
   if (!m) return;
   if (m.t === "closed") { toast("تم إغلاق الغرفة"); leaveToMenu(); return; }
   if (m.t !== "state") return;
-  if (m.kicked && m.kicked.includes(P.id)) { toast("تم طردك من الغرفة"); leaveToMenu(); return; }
+  if (m.kicked && m.kicked.includes(P.id)) { toast("تم إخراجك من الغرفة (طرد أو انتهاء مهلة العودة)"); clearSession(); leaveToMenu(); return; }
   const me = m.players.find(p => p.id === P.id);
   if (!me) { if (!P.joined || P.state) sendJoin(); return; }
   m.localDeadline = Date.now() + (m.remain || 0);
+  m.players.forEach(pl => {                      // تنبيه عند انقطاع أي لاعب
+    if (pl.offline && !P.prevOffline.has(pl.id) && pl.id !== P.id) { playSound("leave"); toast("⚠ " + pl.name + " غادر — لديه 10 ثوانٍ للعودة"); }
+  });
+  P.prevOffline = new Set(m.players.filter(pl => pl.offline).map(pl => pl.id));
   P.state = m; P.team = me.team;
   if (!P.joined) {
     P.joined = true;
+    joinStatus("");
     hide("joinRoomModal"); hide("mainMenuCard");
     show("playerScreen");
+    saveSession();
     P.timer = setInterval(renderPlayerScreen, 200);
+    P.pingTimer = setInterval(() => { if (P.ch && P.joined) P.ch.postMessage({ t: "ping", id: P.id }); }, 2000);
   }
   renderPlayerScreen();
 }
 
+const SETTINGS_MODES = [["both", "خلية الحروف + أزرار"], ["buttons", "أزرار فقط"], ["cells", "خلية حروف فقط"]];
+
+function renderPlayerLobby(st, g) {
+  $("pLobbyCount").textContent = `${st.players.length}/${MAX_PLAYERS}`;
+  $("pLobbyPlayers").innerHTML = st.players.map(p => `<span class="rp-chip ${p.offline ? "gray" : p.team}">${escapeHtml(p.name)}</span>`).join("");
+  const on = (c) => c ? " active" : "";
+  $("pSettings").innerHTML =
+    `<div class="setting-group"><label class="setting-label">نمط اللعب:</label><div class="options-row">` +
+      SETTINGS_MODES.map(([k, l]) => `<button class="opt-btn${on(g.mode === k)}">${l}</button>`).join("") + `</div></div>` +
+    `<div class="setting-group"><label class="setting-label">اسم المنظم:</label><div class="form-input">${escapeHtml(g.organizer || "المنظم")}</div></div>` +
+    `<div class="setting-group"><label class="setting-label">حجم الخلية:</label><div class="grid-size-row">` +
+      [3, 4, 5].map(n => `<button class="grid-opt-btn${on(g.size === n)}"><span class="grid-title">${n}x${n}</span></button>`).join("") + `</div></div>` +
+    `<div class="setting-group"><label class="setting-label">عدد الجولات للفوز:</label><div class="rounds-row">` +
+      [[1, "جولة"], [2, "جولتين"], [3, "ثلاث"], [5, "5 جولات"]].map(([n, l]) => `<button class="round-btn${on(g.target === n)}">${l}</button>`).join("") + `</div></div>`;
+}
+
+function renderMiniBoard(g) {
+  const sig = JSON.stringify([g.grid, g.sel, g.size]);
+  if (sig === P.boardSig) return;
+  P.boardSig = sig;
+  const rows = g.grid.map((row, r) =>
+    `<div class="hex-row${r % 2 ? " offset-row" : ""}">` + row.map((cell, c) => {
+      const [l, st] = cell.split("|");
+      const cls = st === "g" ? " green" : st === "o" ? " orange" : "";
+      const sel = g.sel && g.sel.r === r && g.sel.c === c ? " sel" : "";
+      return `<div class="hex${cls}${sel}"><div class="hex-in">${l}</div></div>`;
+    }).join("") + `</div>`).join("");
+  $("pBoard").innerHTML = `<div class="game-board-frame"><div class="hex-grid-wrapper">${rows}</div></div>`;
+}
+
+function renderPlayerGame(st, g, me) {
+  const now = Date.now();
+  const b = buzzStateFor(st, me, now);
+  $("buzzerBtn").className = `buzzer t-${me.team} b-${b.cls}`;
+  $("buzzerLabel").innerHTML = b.mic ? MIC_SVG.replace('width="24" height="24"', 'width="90" height="90"') : b.label;
+  $("buzzerStatus").textContent = b.text;
+  $("buzzerPts").textContent = me.points || 0;
+  $("pMyName").textContent = P.name;
+  $("pGreenScore").textContent = g.score.green; $("pOrangeScore").textContent = g.score.orange;
+  $("pRoundBadge").textContent = `الجولة ${ROUND_NAMES[g.round] || g.round}`;
+  $("pBoard").style.display = g.mode === "buttons" ? "none" : "block";
+  $("buzzerHolder").style.display = g.mode === "cells" ? "none" : "block";
+  $("buzzerStatus").style.display = g.mode === "cells" ? "none" : "block";
+  if (g.mode !== "buttons") renderMiniBoard(g);
+  $("pOthers").style.display = g.mode === "cells" ? "none" : "flex";
+  $("pOthers").innerHTML = st.players.filter(p => p.id !== P.id).map(p => {
+    const bs = buzzStateFor(st, p, now);
+    return `<div class="op team-${p.team}${p.offline ? " gray" : ""}"><div class="op-circle st-${bs.cls}">${bs.mic ? MIC_SVG.replace('width="24" height="24"', 'width="26" height="26"') : bs.label}</div>` +
+      `<span class="op-pts">${p.points || 0}</span><span class="op-name">${escapeHtml(p.name)}</span></div>`;
+  }).join("");
+}
+
 function renderPlayerScreen() {
   if (!P.state) return;
-  const me = P.state.players.find(p => p.id === P.id) || { id: P.id, team: P.team };
-  $("pScreenName").textContent = P.name;
-  const tag = $("pScreenTeam");
-  tag.textContent = me.team === "green" ? "الفريق الأخضر" : "الفريق البرتقالي";
-  tag.className = "player-team-tag " + me.team;
-  const b = buzzStateFor(P.state, me, Date.now());
-  const ph = P.state.phase, was = P.lastPhase;
+  const st = P.state, g = st.game || { screen: "lobby", mode: "both", size: 5, target: 2, organizer: "المنظم", grid: [], score: { green: 0, orange: 0 } };
+  const me = st.players.find(p => p.id === P.id) || { id: P.id, team: P.team, points: 0 };
+  ["pLobby", "pRound", "pGame", "pFinal"].forEach(id => { $(id).style.display = "none"; });
+  if (g.screen === "round") { $("pRound").style.display = "flex"; $("pRoundTitle").textContent = g.roundText; }
+  else if (g.screen === "game") { $("pGame").style.display = "flex"; renderPlayerGame(st, g, me); }
+  else if (g.screen === "final") { $("pFinal").style.display = "flex"; $("pFinalTitle").textContent = g.finalTitle; $("pFinalSub").textContent = g.finalSub; }
+  else { $("pLobby").style.display = "flex"; renderPlayerLobby(st, g); }
+
+  const ph = st.phase, was = P.lastPhase;
   if (ph !== was) {
-    if ((ph === "answering" || ph === "answering2")) playSound("buzz");
+    if (ph === "answering") playSound("buzz");
+    if (ph === "answering2" && was === "second") playSound("buzz");
     if ((was === "answering" || was === "answering2") && (ph === "expired" || ph === "closed")) playSound("bell");
+    if (was === "second" && ph === "closed") playSound("bell");
     if (ph === "second") playSound("second");
     P.lastPhase = ph;
   }
-  $("buzzerBtn").className = "buzzer b-" + b.cls;
-  $("buzzerLabel").textContent = b.label;
-  $("buzzerStatus").textContent = b.text;
 }
 
 function playerPress() {
@@ -781,10 +967,13 @@ function playerLeave() {
   leaveToMenu();
 }
 
+window.addEventListener("pagehide", () => { if (P.joined && P.ch) P.ch.postMessage({ t: "leave", id: P.id }); });
+document.addEventListener("visibilitychange", () => { if (!document.hidden && P.joined && P.ch) { sendJoin(); P.ch.postMessage({ t: "ping", id: P.id }); } });
+
 function leaveToMenu() {
-  clearInterval(P.timer);
+  clearInterval(P.timer); clearInterval(P.pingTimer);
   if (P.ch) { P.ch.close(); P.ch = null; }
-  P.joined = false; P.state = null; P.lastPhase = null;
+  P.joined = false; P.state = null; P.lastPhase = null; P.boardSig = ""; P.prevOffline = new Set();
   hide("playerScreen");
   show("mainMenuCard", "block");
 }

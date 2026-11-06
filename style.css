@@ -386,3 +386,49 @@ input:checked + .slider:before { transform: translateX(-20px); background-color:
 .qr-card-img { background: #fff; padding: 6px; border-radius: 10px; line-height: 0; }
 .qr-card-img img, .qr-card-img canvas { display: block; }
 .room-code-display { direction: ltr; }
+
+.join-status { min-height: 1.4em; font-size: .85rem; line-height: 1.6; text-align: center; font-weight: 700; }
+
+/* ===== شاشة اللاعب (مطابقة للفيديو) ===== */
+.player-screen { display: none; overflow: auto; padding: 0; justify-content: flex-start; align-items: stretch; }
+.player-screen > .p-view { display: none; width: 100%; min-height: 100%; }
+.p-lobby { flex-direction: column; gap: 14px; padding: 18px; max-width: 520px; margin: 0 auto; align-items: stretch; }
+.p-brand { align-self: center; margin-bottom: 6px; }
+.p-card { background: var(--panel); border-radius: 16px; padding: 16px; border: 1px solid #52297d; }
+.pl-readonly { pointer-events: none; display: flex; flex-direction: column; gap: 10px; }
+.pl-readonly .opt-btn, .pl-readonly .grid-opt-btn, .pl-readonly .round-btn { padding: 8px; font-size: .85rem; }
+.pl-readonly .setting-label { font-size: .85rem; }
+.p-wait { text-align: center; color: var(--yellow); font-weight: 900; margin: 6px 0; }
+.p-round { align-items: center; justify-content: center; }
+.p-final { flex-direction: column; align-items: center; justify-content: center; gap: 16px; text-align: center; padding: 20px; }
+.p-game { flex-direction: column; gap: 10px; padding: 12px 16px; }
+.p-top { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.p-top-btns { display: flex; gap: 10px; flex-wrap: wrap; }
+.p-mid { display: flex; gap: 14px; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; }
+.p-board .game-board-frame { --hw: clamp(20px, 5.2vw, 34px); border-width: 3px; border-radius: 10px; }
+.p-board .hex { cursor: default; }
+.p-others { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; flex: 1; min-width: 120px; padding-top: 10px; }
+.op { position: relative; display: flex; flex-direction: column; align-items: center; gap: 3px; width: 64px; }
+.op-circle { width: 52px; height: 52px; border-radius: 50%; border: 5px solid; background-clip: padding-box; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 0 4px #111; font-weight: 900; color: #fff; }
+.op.team-green .op-circle { border-color: var(--green-2); } .op.team-orange .op-circle { border-color: var(--orange); }
+.op-name { font-size: .72rem; color: #cbbbe8; max-width: 64px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; }
+.op.gray { opacity: .85; }
+.pts-badge, .op-pts { position: absolute; background: #fff; color: #111; font-weight: 900; border-radius: 50%; display: flex; align-items: center; justify-content: center; border: 3px solid #111; }
+.op-pts { top: -6px; right: 0; width: 22px; height: 22px; font-size: .75rem; }
+.pts-badge { top: -4px; right: -6px; width: 38px; height: 38px; font-size: 1.1rem; }
+.p-score { background: var(--panel); border-radius: 16px; padding: 12px; min-width: 210px; border: 1px solid rgba(255,255,255,.06); }
+.p-score .score-box { padding: 8px; }
+.p-score .score-num { font-size: 1.3rem; }
+.p-buzzer-area { display: flex; flex-direction: column; align-items: center; gap: 8px; margin-top: auto; padding-bottom: 10px; }
+.buzzer-holder { position: relative; }
+.buzzer { width: min(46vw, 30vh, 250px); height: min(46vw, 30vh, 250px); font-size: 4rem; }
+.buzzer, .buzzer.b-blue, .buzzer.b-green, .buzzer.b-orange, .buzzer.b-red, .buzzer.b-white, .buzzer.b-gray { border: 12px solid var(--ring, #f57c00); box-shadow: 0 0 0 14px #111, 0 18px 36px rgba(0,0,0,.45); }
+.buzzer.t-green { --ring: #2ecc71; } .buzzer.t-orange { --ring: #f57c00; }
+.buzzer.b-gray { background: #8a8a8a; }
+.p-myname { font-weight: 900; color: #e2d9f3; }
+.leave-btn { padding: 8px 26px; font-size: .9rem; }
+.st-gray { background: #8a8a8a; }
+.pb-pts { position: absolute; top: -4px; right: 2px; background: #fff; color: #111; width: 20px; height: 20px; border-radius: 50%; font-size: .72rem; font-weight: 900; display: flex; align-items: center; justify-content: center; border: 2px solid #111; }
+.pb { position: relative; }
+.rp-chip.gray { background: #8a8a8a; }
+@media (max-width: 700px) { .p-mid { flex-direction: column; align-items: center; } .p-score { width: 100%; } }
