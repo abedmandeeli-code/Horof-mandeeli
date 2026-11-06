@@ -470,43 +470,5 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
   <script src="questions.js?v=4"></script>
   <script src="script.js?v=4"></script>
-  <script type="module">
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-  import { getFirestore, doc, setDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
-
-  const firebaseConfig = {
-    apiKey: "AIzaSy...",
-    authDomain: "horof-mandeeli.firebaseapp.com",
-    projectId: "horof-mandeeli",
-    storageBucket: "horof-mandeeli.firebasestorage.app",
-    messagingSenderId: "839167176943",
-    appId: "1:839167176943:web:..."
-  };
-
-  const app = initializeApp(firebaseConfig);
-  const db = getFirestore(app);
-
-  // دالة إنشاء الغرفة تلقائياً وربطها باللعبة
-  window.createRoomInFirebase = async function(roomCode) {
-    try {
-      await setDoc(doc(db, "rooms", roomCode), {
-        status: "waiting",
-        createdAt: new Date().toISOString(),
-        players: []
-      });
-      console.log("تم إنشاء الغرفة في Firebase بنجاح!");
-    } catch (e) {
-      console.error("خطأ في إنشاء الغرفة:", e);
-    }
-  };
-
-  // التقاط أي محاولة لإنشاء غرفة وتفعيل السحابة بدلاً من P2P
-  document.addEventListener("click", function(event) {
-    if (event.target && event.target.id && event.target.id.includes("create")) {
-      const randomCode = Math.floor(1000 + Math.random() * 9000).toString();
-      window.createRoomInFirebase(randomCode);
-    }
-  });
-</script>
 </body>
 </html>
