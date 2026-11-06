@@ -3,9 +3,9 @@ const $ = id => document.getElementById(id);
 const ALPHABET = ["أ","ب","ت","ث","ج","ح","خ","د","ذ","ر","ز","س","ش","ص","ض","ط","ظ","ع","غ","ف","ق","ك","ل","م","ن","هـ","و","ي"];
 const ROUND_NAMES = ["","الأولى","الثانية","الثالثة","الرابعة","الخامسة","السادسة","السابعة","الثامنة","التاسعة","العاشرة"];
 const TEAM_AR = { green: "الأخضر", orange: "البرتقالي" };
-const ANSWER_SECONDS = 10;
-const SECOND_SECONDS = 10;
-const MAX_PLAYERS = 40;
+const ANSWER_SECONDS = 3;   // وقت الفريق الأول
+const SECOND_SECONDS = 10;  // وقت لاعب الفريق الثاني بعد ضغطه
+const MAX_PLAYERS = 50;
 
 let soundEnabled = true;
 let audioCtx = null;
@@ -38,6 +38,32 @@ function playSound(type) {
       gain.gain.setValueAtTime(0.15, t);
       gain.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
       osc.start(); osc.stop(t + 0.3);
+    } else if (type === "bell") {
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(392, t);
+      gain.gain.setValueAtTime(0.22, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 1.8);
+      osc.start(); osc.stop(t + 1.8);
+      [[784, 0.16], [1176, 0.1], [1568, 0.08], [2352, 0.05]].forEach(([f, g]) => {
+        const o = audioCtx.createOscillator(), gn = audioCtx.createGain();
+        o.type = "sine"; o.frequency.setValueAtTime(f, t);
+        gn.gain.setValueAtTime(g, t); gn.gain.exponentialRampToValueAtTime(0.001, t + 1.4);
+        o.connect(gn); gn.connect(audioCtx.destination); o.start(t); o.stop(t + 1.5);
+      });
+    } else if (type === "timeup") {
+      osc.type = "sawtooth";
+      osc.frequency.setValueAtTime(520, t);
+      osc.frequency.linearRampToValueAtTime(180, t + 0.6);
+      gain.gain.setValueAtTime(0.18, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.65);
+      osc.start(); osc.stop(t + 0.65);
+    } else if (type === "second") {
+      osc.type = "triangle";
+      osc.frequency.setValueAtTime(660, t);
+      osc.frequency.setValueAtTime(990, t + 0.12);
+      gain.gain.setValueAtTime(0.15, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+      osc.start(); osc.stop(t + 0.35);
     } else if (type === "buzz") {
       osc.type = "square";
       osc.frequency.setValueAtTime(220, t);
@@ -68,12 +94,12 @@ const G = {
 const R = {            // حالة المنظم / الغرفة
   code: null, ch: null, tick: null, url: "",
   players: {}, kicked: new Set(),
-  phase: "ready", winnerId: null, secondTeam: null, deadline: 0,
+  phase: "ready", winnerId: null, secondTeam: null, deadline: 0, chainDone: false,
   menuPlayerId: null, lastBroadcast: 0
 };
 
 const P = {            // حالة اللاعب
-  id: null, name: "", team: "green", ch: null, state: null, joined: false, timer: null
+  id: null, name: "", team: "green", ch: null, state: null, joined: false, timer: null, lastPhase: null
 };
 
 let selectedJoinTeam = "green";
@@ -86,8 +112,10 @@ document.addEventListener("DOMContentLoaded", () => {
     s.textContent = ALPHABET[Math.floor(Math.random() * ALPHABET.length)];
     bg.appendChild(s);
   }
-  const room = new URLSearchParams(location.search).get("room");
-  if (room) { $("roomCode").value = room; openJoinRoom(); }
+  const params = new URLSearchParams(location.search);
+  const room = params.get("room");
+  if (room) { $("roomCode").value = room.toUpperCase(); openJoinRoom(); }
+  else if (params.get("qb")) { setTimeout(enterQuestionBankApp, 50); }
   document.addEventListener("click", () => { if (audioCtx && audioCtx.state === "suspended") audioCtx.resume(); }, { once: true });
 });
 
@@ -95,6 +123,13 @@ document.addEventListener("DOMContentLoaded", () => {
 /* =====================  الاتصال بين الأجهزة (PeerJS / WebRTC)  =====================
    المنظم = Peer معرّفه 7rof-رمز_الغرفة، واللاعبون يتصلون به مباشرة.
    إن لم تُحمَّل المكتبة يعود للعمل بين تبويبات نفس المتصفح فقط. */
+const PEER_OPTS = { config: { iceServers: [
+  { urls: "stun:stun.l.google.com:19302" },
+  { urls: "stun:global.stun.twilio.com:3478" },
+  { urls: "turn:openrelay.metered.ca:80", username: "openrelayproject", credential: "openrelayproject" },
+  { urls: "turn:openrelay.metered.ca:443", username: "openrelayproject", credential: "openrelayproject" }
+] } };
+
 function makeOrganizerChannel(code) {
   if (typeof Peer === "undefined") return new BroadcastChannel("7rof_" + code);
   const conns = new Set();
@@ -103,13 +138,16 @@ function makeOrganizerChannel(code) {
     postMessage(m) { conns.forEach(c => { if (c.open) { try { c.send(m); } catch (e) { /* ignore */ } } }); },
     close() { try { peer.destroy(); } catch (e) { /* ignore */ } }
   };
-  const peer = new Peer("7rof-" + code);
+  const peer = new Peer("7rof-" + code, PEER_OPTS);
   peer.on("connection", c => {
     conns.add(c);
     c.on("data", d => { if (ch.onmessage) ch.onmessage({ data: d }); });
     c.on("close", () => conns.delete(c));
   });
-  peer.on("error", e => { if (e.type === "unavailable-id") toast("رمز الغرفة مستخدم، أغلق الغرفة وأنشئ غرفة جديدة"); });
+  peer.on("error", e => {
+    if (e.type === "unavailable-id") toast("رمز الغرفة مستخدم، أغلق الغرفة وأنشئ غرفة جديدة");
+    else toast("مشكلة اتصال بخادم الغرفة: " + e.type);
+  });
   return ch;
 }
 
@@ -121,13 +159,13 @@ function makePlayerChannel(code) {
     postMessage(m) { if (conn && conn.open) conn.send(m); else queue.push(m); },
     close() { try { peer.destroy(); } catch (e) { /* ignore */ } }
   };
-  const peer = new Peer();
+  const peer = new Peer(undefined, PEER_OPTS);
   peer.on("open", () => {
     conn = peer.connect("7rof-" + code, { reliable: true });
     conn.on("open", () => queue.splice(0).forEach(m => conn.send(m)));
     conn.on("data", d => { if (ch.onmessage) ch.onmessage({ data: d }); });
   });
-  peer.on("error", () => { /* يُعالج بمهلة الانضمام */ });
+  peer.on("error", e => toast(e.type === "peer-unavailable" ? "الغرفة غير موجودة أو أُغلقت — تأكد من الرمز" : "مشكلة اتصال: " + e.type));
   return ch;
 }
 
@@ -139,8 +177,15 @@ function openCreateRoom() {
   show("createRoomModal");
 }
 
+const CODE_CHARS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";   // بدون أحرف متشابهة (O/0 و I/1/L)
+function genCode() {
+  const a = new Uint32Array(6);
+  (window.crypto || window.msCrypto).getRandomValues(a);
+  return Array.from(a, x => CODE_CHARS[x % CODE_CHARS.length]).join("");
+}
+
 function createRoom() {
-  R.code = String(Math.floor(100000 + Math.random() * 900000));
+  R.code = genCode();
   R.players = {}; R.kicked = new Set();
   resetBuzzState();
   R.url = location.href.split(/[?#]/)[0] + "?room=" + R.code;
@@ -211,7 +256,7 @@ function selectGrid(id) {
 function selectRound(n) {
   playSound("click");
   G.target = n;
-  setActive(["round1", "round2", "round3"], n === 3 ? "round1" : n === 2 ? "round2" : "round3");
+  setActive(["round1", "round2", "round3", "round5"], n === 5 ? "round5" : n === 3 ? "round1" : n === 2 ? "round2" : "round3");
 }
 
 /* =====================  بدء اللعبة  ===================== */
@@ -229,7 +274,20 @@ function startGame() {
   showRoundTransitionScreen();
 }
 
+function renderGameQr() {
+  const card = $("gameQrCard");
+  if (!R.code || G.mode === "cells") { card.style.display = "none"; return; }
+  card.style.display = "flex";
+  $("gameQrCode").textContent = R.code;
+  const el = $("gameQr");
+  el.innerHTML = "";
+  if (typeof QRCode !== "undefined") {
+    new QRCode(el, { text: R.url, width: 104, height: 104, colorDark: "#3b195c", colorLight: "#ffffff", correctLevel: QRCode.CorrectLevel.H });
+  }
+}
+
 function applyModeLayout() {
+  renderGameQr();
   $("boardFrame").style.display = G.mode === "buttons" ? "none" : "flex";
   $("playersPanel").style.display = G.mode === "cells" ? "none" : "block";
   $("scoreHint").style.display = G.mode === "buttons" ? "none" : "block";
@@ -439,9 +497,17 @@ function backToRoom() {
   if (R.code) { renderRoomModal(); show("createRoomModal"); }
 }
 
-/* =====================  البازر: حالة المنظم  ===================== */
+/* =====================  البازر: حالة المنظم  =====================
+   ready      : الكل أزرق جاهز
+   answering  : أول ضاغط (فريق ١) معه 3 ثوانٍ فقط
+   expired    : انتهت الثواني — فريقه مقفل حتى يعيد المنظم الضبط
+   second     : المنظم فتح +10ث: أزرار الفريق الآخر بيضاء (10) بانتظار الضغط
+   answering2 : لاعب من الفريق الثاني ضغط — عدّاد 10 ثوانٍ
+   closed     : انتهت الـ 10 — الكل مقفل حتى إعادة الضبط */
+const MIC_SVG = '<svg viewBox="0 0 24 24" width="24" height="24" fill="#fff"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z"/></svg>';
+
 function resetBuzzState() {
-  R.phase = "ready"; R.winnerId = null; R.secondTeam = null; R.deadline = 0;
+  R.phase = "ready"; R.winnerId = null; R.firstTeam = null; R.secondTeam = null; R.deadline = 0; R.total = 0;
 }
 
 function resetButtons() {
@@ -450,19 +516,25 @@ function resetButtons() {
   organizerUpdate();
 }
 
+/* إعادة ضبط +10ث: يفتح المجال للفريق الآخر (العدّاد يبدأ عند ضغط أحد لاعبيه) */
 function resetSecondChance() {
   playSound("click");
-  const w = R.players[R.winnerId];
-  if (!w) { toast("لا يوجد لاعب ضغط الزر بعد"); return; }
-  R.secondTeam = w.team === "green" ? "orange" : "green";
-  R.phase = "second";
-  R.deadline = Date.now() + SECOND_SECONDS * 1000;
+  if ((R.phase !== "answering" && R.phase !== "expired") || !R.firstTeam) {
+    toast("اضغط أولاً على إعادة ضبط الأزرار، ثم انتظر ضغط فريق");
+    return;
+  }
+  R.secondTeam = R.firstTeam === "green" ? "orange" : "green";
+  R.phase = "second"; R.deadline = 0; R.total = 0;
+  playSound("second");
   organizerUpdate();
 }
 
-function startAnswering(id) {
-  R.phase = "answering"; R.winnerId = id; R.secondTeam = null;
-  R.deadline = Date.now() + ANSWER_SECONDS * 1000;
+function startAnswering(id, second) {
+  const p = R.players[id];
+  R.winnerId = id;
+  if (second) { R.phase = "answering2"; R.total = SECOND_SECONDS * 1000; }
+  else { R.phase = "answering"; R.firstTeam = p.team; R.secondTeam = null; R.total = ANSWER_SECONDS * 1000; }
+  R.deadline = Date.now() + R.total;
   playSound("buzz");
   organizerUpdate();
 }
@@ -470,15 +542,15 @@ function startAnswering(id) {
 function handlePress(id) {
   const p = R.players[id];
   if (!p) return;
-  if (R.phase === "ready") startAnswering(id);
-  else if (R.phase === "second" && p.team === R.secondTeam) startAnswering(id);
+  if (R.phase === "ready") startAnswering(id, false);
+  else if (R.phase === "second" && p.team === R.secondTeam) startAnswering(id, true);
 }
 
 function organizerTick() {
   const now = Date.now();
   let changed = false;
-  if (R.phase === "answering" && now > R.deadline) { R.phase = "expired"; changed = true; }
-  else if (R.phase === "second" && now > R.deadline) { R.phase = "closed"; changed = true; }
+  if (R.phase === "answering" && now > R.deadline) { playSound("bell"); R.phase = "expired"; changed = true; }
+  else if (R.phase === "answering2" && now > R.deadline) { playSound("bell"); R.phase = "closed"; changed = true; }
   if (changed) organizerUpdate();
   else if (now - R.lastBroadcast > 1000) broadcastState();
 }
@@ -492,9 +564,11 @@ function organizerUpdate() {
 function broadcastState() {
   if (!R.ch) return;
   R.lastBroadcast = Date.now();
+  const w = R.players[R.winnerId];
   R.ch.postMessage({
     t: "state", room: R.code, players: Object.values(R.players), kicked: [...R.kicked],
-    phase: R.phase, winnerId: R.winnerId, secondTeam: R.secondTeam, deadline: R.deadline
+    phase: R.phase, winnerId: R.winnerId, winnerName: w ? w.name : "", firstTeam: R.firstTeam, secondTeam: R.secondTeam,
+    total: R.total, remain: Math.max(0, R.deadline - Date.now())   // المتبقي بدل الوقت المطلق (اختلاف ساعات الأجهزة)
   });
 }
 
@@ -511,44 +585,94 @@ function onOrganizerMessage(m) {
   else if (m.t === "leave") { delete R.players[m.id]; organizerUpdate(); }
 }
 
-/* حالة زر لاعب بحسب حالة الغرفة (يُستخدم عند المنظم واللاعب) */
+/* حالة زر لاعب بحسب حالة الغرفة (تُستخدم عند المنظم واللاعب) */
+function stateDeadline(state) { return state.localDeadline !== undefined ? state.localDeadline : state.deadline; }
+
 function buzzStateFor(state, p, now) {
   const mine = state.winnerId === p.id;
-  const secs = Math.max(0, Math.ceil((state.deadline - now) / 1000));
+  const secs = Math.max(0, Math.ceil((stateDeadline(state) - now) / 1000));
   switch (state.phase) {
     case "ready": return { cls: "blue", label: "", text: "جاهز! اضغط عند معرفة الإجابة", canPress: true };
-    case "answering": return mine
-      ? { cls: "green", label: String(secs), text: "أنت الأسرع! أجب الآن", canPress: false }
+    case "answering":
+    case "answering2": return mine
+      ? { cls: "green", label: String(secs), mic: true, text: "أنت الأسرع! أجب الآن", canPress: false }
       : { cls: "orange", label: "", text: "مقفل — سبقك لاعب آخر", canPress: false };
     case "expired": return mine
-      ? { cls: "red", label: "", text: "انتهى الوقت", canPress: false }
-      : { cls: "orange", label: "", text: "مقفل", canPress: false };
+      ? { cls: "red", label: "", text: "انتهى وقتك — مقفل حتى يسمح المنظم", canPress: false }
+      : { cls: "orange", label: "", text: "مقفل — بانتظار المنظم", canPress: false };
     case "second":
-      if (p.team === state.secondTeam) return { cls: "white", label: String(secs), text: "فرصة ثانية! اضغط الآن", canPress: true };
-      return mine ? { cls: "red", label: "", text: "انتهى الوقت", canPress: false } : { cls: "orange", label: "", text: "مقفل", canPress: false };
+      if (p.team === state.secondTeam) return { cls: "white", label: "10", text: "فرصة ثانية! اضغط للإجابة (10 ثوانٍ)", canPress: true };
+      return mine ? { cls: "red", label: "", text: "مقفل", canPress: false } : { cls: "orange", label: "", text: "مقفل", canPress: false };
     case "closed": return { cls: "red", label: "", text: "انتهى الوقت", canPress: false };
   }
   return { cls: "blue", label: "", text: "", canPress: false };
 }
 
-/* لوحة اللاعبين عند المنظم */
+/* لوحة اللاعبين عند المنظم: الدائرة الزرقاء؛ من ضغط أولاً يظهر فيها مايك واسمه */
 function renderPlayersPanel() {
   const list = Object.values(R.players);
-  $("playersCountTxt").textContent = list.length;
+  $("playersCountTxt").textContent = `${list.length}/${MAX_PLAYERS}`;
   const now = Date.now();
-  const st = { phase: R.phase, winnerId: R.winnerId, secondTeam: R.secondTeam, deadline: R.deadline };
+  const st = { phase: R.phase, winnerId: R.winnerId, firstTeam: R.firstTeam, secondTeam: R.secondTeam, deadline: R.deadline };
   $("playerBubbles").innerHTML = "";
   list.forEach(p => {
     const b = buzzStateFor(st, p, now);
     const btn = document.createElement("button");
-    btn.className = `pb team-${p.team}`;
-    btn.innerHTML = `<div class="pb-circle st-${b.cls}">${b.label}</div><span class="pb-name">${escapeHtml(p.name)}</span>`;
+    btn.className = `pb team-${p.team}` + (b.mic ? " is-first" : "");
+    btn.innerHTML = `<div class="pb-circle st-${b.cls}">${b.mic ? MIC_SVG : b.label}</div><span class="pb-name">${escapeHtml(p.name)}</span>`;
     btn.onclick = () => onPlayerBubbleClick(p.id);
     $("playerBubbles").appendChild(btn);
   });
 }
 
-setInterval(() => { if (R.code && (R.phase === "answering" || R.phase === "second")) renderPlayersPanel(); }, 500);
+setInterval(() => { if (R.code && (R.phase === "answering" || R.phase === "answering2")) renderPlayersPanel(); }, 300);
+
+/* =====================  العدّاد الظاهر للجميع  =====================
+   الثلاث ثوانٍ: حلقة متدرجة (فيديو 1) — العشر ثوانٍ: ساعة إيقاف (فيديو 2) */
+function ringSvg(frac, secs) {
+  const r = 50, C = 2 * Math.PI * r;
+  return `<svg class="cd-svg" viewBox="0 0 120 120" width="120" height="120">
+    <defs><linearGradient id="cdGrad" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#ffeb3b"/><stop offset=".3" stop-color="#ef4444"/>
+      <stop offset=".55" stop-color="#e91e8c"/><stop offset=".8" stop-color="#5b2ea6"/><stop offset="1" stop-color="#0ea5e9"/>
+    </linearGradient></defs>
+    <circle cx="60" cy="60" r="${r}" fill="none" stroke="#262626" stroke-width="7"/>
+    <circle cx="60" cy="60" r="${r}" fill="none" stroke="url(#cdGrad)" stroke-width="7" stroke-linecap="round"
+      stroke-dasharray="${(C * frac).toFixed(1)} ${C.toFixed(1)}" transform="rotate(-90 60 60)"/>
+    <text x="60" y="71" text-anchor="middle" font-size="32" font-weight="900" fill="#fff" font-family="Tajawal,sans-serif">0:${String(secs).padStart(2, "0")}</text>
+  </svg>`;
+}
+
+function watchSvg(frac, secs) {
+  const a = 2 * Math.PI * (1 - frac), x = 60 + 44 * Math.sin(a), y = 78 - 44 * Math.cos(a);
+  const pie = (1 - frac) < 0.002 ? "" :
+    (1 - frac) > 0.998 ? `<circle cx="60" cy="78" r="44" fill="#2b1245"/>` :
+    `<path d="M60 78 L60 34 A44 44 0 ${a > Math.PI ? 1 : 0} 1 ${x.toFixed(2)} ${y.toFixed(2)} Z" fill="#2b1245"/>`;
+  return `<svg class="cd-svg" viewBox="0 0 120 140" width="120" height="140">
+    <rect x="48" y="2" width="24" height="9" rx="3" fill="#ffeb3b"/><rect x="56" y="10" width="8" height="12" fill="#ffeb3b"/>
+    <circle cx="60" cy="78" r="54" fill="none" stroke="#ffeb3b" stroke-width="8"/>
+    <circle cx="60" cy="78" r="44" fill="#fff"/>${pie}
+    <text x="60" y="94" text-anchor="middle" font-size="46" font-weight="900" fill="#fff" stroke="#2b1245" stroke-width="7" paint-order="stroke" font-family="Tajawal,sans-serif">${secs}</text>
+  </svg>`;
+}
+
+function renderCountdown() {
+  const box = $("countdownBox");
+  let st = null;
+  if (P.joined && P.state) {
+    st = { phase: P.state.phase, deadline: P.state.localDeadline, total: P.state.total, name: P.state.winnerName };
+  } else if (R.code && $("gameScreen").style.display === "flex") {
+    st = { phase: R.phase, deadline: R.deadline, total: R.total, name: (R.players[R.winnerId] || {}).name };
+  }
+  if (!st || (st.phase !== "answering" && st.phase !== "answering2")) { box.style.display = "none"; return; }
+  const remain = Math.max(0, st.deadline - Date.now());
+  const frac = Math.min(1, remain / (st.total || 1));
+  const secs = Math.ceil(remain / 1000);
+  box.style.display = "flex";
+  const name = st.name ? `<div class="cd-name">${MIC_SVG}<span>${escapeHtml(st.name)}</span></div>` : "";
+  box.innerHTML = (st.phase === "answering" ? ringSvg(frac, secs) : watchSvg(frac, secs)) + name;
+}
+setInterval(renderCountdown, 100);
 
 function onPlayerBubbleClick(id) {
   const p = R.players[id];
@@ -584,7 +708,7 @@ function selectTeam(team, silent) {
 function enterGame(event) {
   event.preventDefault();
   playSound("score");
-  const code = $("roomCode").value.trim();
+  const code = $("roomCode").value.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
   const name = $("playerName").value.trim();
   if (!code || !name) return;
 
@@ -611,6 +735,7 @@ function onPlayerMessage(m) {
   if (m.kicked && m.kicked.includes(P.id)) { toast("تم طردك من الغرفة"); leaveToMenu(); return; }
   const me = m.players.find(p => p.id === P.id);
   if (!me) { if (!P.joined || P.state) sendJoin(); return; }
+  m.localDeadline = Date.now() + (m.remain || 0);
   P.state = m; P.team = me.team;
   if (!P.joined) {
     P.joined = true;
@@ -629,6 +754,13 @@ function renderPlayerScreen() {
   tag.textContent = me.team === "green" ? "الفريق الأخضر" : "الفريق البرتقالي";
   tag.className = "player-team-tag " + me.team;
   const b = buzzStateFor(P.state, me, Date.now());
+  const ph = P.state.phase, was = P.lastPhase;
+  if (ph !== was) {
+    if ((ph === "answering" || ph === "answering2")) playSound("buzz");
+    if ((was === "answering" || was === "answering2") && (ph === "expired" || ph === "closed")) playSound("bell");
+    if (ph === "second") playSound("second");
+    P.lastPhase = ph;
+  }
   $("buzzerBtn").className = "buzzer b-" + b.cls;
   $("buzzerLabel").textContent = b.label;
   $("buzzerStatus").textContent = b.text;
@@ -652,7 +784,7 @@ function playerLeave() {
 function leaveToMenu() {
   clearInterval(P.timer);
   if (P.ch) { P.ch.close(); P.ch = null; }
-  P.joined = false; P.state = null;
+  P.joined = false; P.state = null; P.lastPhase = null;
   hide("playerScreen");
   show("mainMenuCard", "block");
 }
@@ -705,7 +837,7 @@ function openQuestionBank() {
   const el = $("qbQrCode");
   el.innerHTML = "";
   if (typeof QRCode !== "undefined") {
-    new QRCode(el, { text: location.href.split("?")[0], width: 120, height: 120, colorDark: "#1a1a1a", colorLight: "#ffffff", correctLevel: QRCode.CorrectLevel.H });
+    new QRCode(el, { text: location.href.split(/[?#]/)[0] + "?qb=1", width: 120, height: 120, colorDark: "#1a1a1a", colorLight: "#ffffff", correctLevel: QRCode.CorrectLevel.H });
   }
 }
 function closeQuestionBankModal() { playSound("click"); hide("questionBankModal"); }

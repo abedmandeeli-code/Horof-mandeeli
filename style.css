@@ -367,3 +367,22 @@ input:checked + .slider:before { transform: translateX(-20px); background-color:
 .qb-login-form { display: flex; flex-direction: column; gap: 12px; margin-top: 10px; }
 .qb-input { background: #262626; border-color: #444; }
 .qb-login-error { color: #ff6b78; font-size: .85rem; min-height: 1.2em; }
+
+/* ===== العدّاد الظاهر للجميع ===== */
+.countdown { position: fixed; top: 72px; left: 50%; transform: translateX(-50%); z-index: 950; display: flex; flex-direction: column; align-items: center; gap: 4px;
+  background: rgba(16, 6, 34, .88); border: 1px solid rgba(255,255,255,.12); border-radius: 22px; padding: 10px 22px 12px; box-shadow: 0 10px 30px rgba(0,0,0,.5); }
+.cd-svg { display: block; }
+.cd-name { display: flex; align-items: center; gap: 6px; font-weight: 900; font-size: 1.1rem; color: #fff; background: #2ecc71; padding: 4px 14px; border-radius: 14px; }
+.cd-name svg { width: 18px; height: 18px; }
+.pb.is-first .pb-circle { box-shadow: 0 0 0 4px rgba(46,204,113,.45), 0 3px 8px rgba(0,0,0,.4); }
+.pb.is-first .pb-name { color: #5be37d; font-weight: 900; }
+.pb-circle svg { display: block; }
+
+/* ===== باركود الغرفة داخل اللعبة ===== */
+.qr-card { background: var(--panel); border: 1px solid rgba(255,255,255,.06); border-radius: 18px; padding: 12px 14px; align-items: center; justify-content: space-between; gap: 12px; }
+.qr-card-title { font-weight: 700; font-size: .95rem; }
+.qr-card-code { font-size: 1.5rem; font-weight: 900; letter-spacing: 3px; color: var(--yellow); direction: ltr; margin: 4px 0; }
+.qr-card-hint { font-size: .75rem; color: #bda2e6; }
+.qr-card-img { background: #fff; padding: 6px; border-radius: 10px; line-height: 0; }
+.qr-card-img img, .qr-card-img canvas { display: block; }
+.room-code-display { direction: ltr; }

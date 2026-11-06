@@ -17,7 +17,6 @@
   <!-- القائمة الرئيسية -->
   <div class="main-card" id="mainMenuCard">
     <div class="header">
-      <span class="badge free-badge">!Free</span>
       <h1 class="logo-title">7rof</h1>
       <h2 class="logo-subtitle">منديلي</h2>
     </div>
@@ -27,7 +26,6 @@
         <button class="btn btn-primary" onclick="openJoinRoom()">الانضمام لغرفة</button>
       </div>
       <div class="button-full-wrapper">
-        <span class="badge new-badge">جديد</span>
         <button class="btn btn-secondary btn-full" onclick="openQuestionBank()">بنك الأسئلة</button>
       </div>
       <button class="btn btn-secondary btn-full" onclick="openHowToPlay()">شرح طريقة اللعب</button>
@@ -80,6 +78,15 @@
               <span class="score-num" id="orangeScoreVal">0</span>
             </div>
           </div>
+        </div>
+
+        <div class="qr-card" id="gameQrCard" style="display:none;">
+          <div class="qr-card-text">
+            <div class="qr-card-title">انضم للغرفة</div>
+            <div class="qr-card-code" id="gameQrCode">------</div>
+            <div class="qr-card-hint">امسح الباركود بالجوال</div>
+          </div>
+          <div class="qr-card-img" id="gameQr"></div>
         </div>
 
         <div class="players-panel" id="playersPanel">
@@ -276,7 +283,7 @@
   <div id="createRoomModal" class="modal-overlay">
     <div class="modal-content create-room-content">
       <div class="room-section">
-        <div class="room-section-header"><span>اللاعبين</span><span id="roomPlayersCount">0/40</span></div>
+        <div class="room-section-header"><span>اللاعبين</span><span id="roomPlayersCount">0/50</span></div>
         <p class="room-sub-text" id="roomPlayersEmpty">لا يوجد لاعبون حالياً.<br>شارك رابط الغرفة لإضافة لاعبين وبدء اللعب.</p>
         <div class="room-players-list" id="roomPlayersList"></div>
       </div>
@@ -333,6 +340,7 @@
               <button type="button" class="round-btn" id="round3" onclick="selectRound(1)">جولة</button>
               <button type="button" class="round-btn active" id="round2" onclick="selectRound(2)">جولتين</button>
               <button type="button" class="round-btn" id="round1" onclick="selectRound(3)">ثلاث</button>
+              <button type="button" class="round-btn" id="round5" onclick="selectRound(5)">5 جولات</button>
             </div>
           </div>
 
@@ -348,13 +356,12 @@
   <div id="joinRoomModal" class="modal-overlay">
     <div class="modal-content join-modal-content">
       <div class="header">
-        <span class="badge free-badge">!Free</span>
-        <h1 class="logo-title">7rof</h1>
+          <h1 class="logo-title">7rof</h1>
         <h2 class="logo-subtitle">منديلي</h2>
       </div>
       <form onsubmit="enterGame(event)" class="join-form">
         <div class="form-group"><label for="roomCode">رمز الغرفة:</label>
-          <input type="text" id="roomCode" class="form-input" inputmode="numeric" placeholder="أدخل رمز الغرفة" required /></div>
+          <input type="text" id="roomCode" class="form-input" autocapitalize="characters" autocomplete="off" dir="ltr" maxlength="10" placeholder="مثال: K7M2QX" required /></div>
         <div class="form-group"><label for="playerName">اسمك:</label>
           <input type="text" id="playerName" class="form-input" placeholder="أدخل اسمك" maxlength="14" required /></div>
         <div class="form-group"><label>اختر فريقك:</label>
@@ -401,7 +408,7 @@
           <h3 class="section-title">🎮 أزرار التحكم للمنظم:</h3>
           <ul class="req-list">
             <li><strong>إعادة ضبط الأزرار</strong>: يفتح المجال للاعبين للضغط من جديد للسؤال القادم.</li>
-            <li><strong>إعادة ضبط +10ث</strong>: فرصة ثانية! تُفعَّل بعد إجابة خاطئة أو انتهاء وقت اللاعب الأول، ليُفتح المجال للفريق الآخر للإجابة خلال 10 ثوانٍ.</li>
+            <li><strong>إعادة ضبط +10ث</strong>: فرصة ثانية! تختار أنت متى تُفعَّلها بعد إجابة خاطئة أو انتهاء الـ 3 ثوانٍ، فتُفتح الأزرار للفريق الآخر، ويبدأ عدّاد 10 ثوانٍ لأول لاعب منهم يضغط. الفريق الأول يبقى مقفلاً حتى تعيد ضبط الأزرار.</li>
             <li><strong>مسح الخلية</strong>: يصفّر جميع النقاط في الجولة، مع خيار لتغيير الحروف عشوائياً أو إبقائها.</li>
           </ul>
         </div>
@@ -441,10 +448,10 @@
         <div class="section-block">
           <h3 class="section-title">⚪ شرح الأزرار (البازر):</h3>
           <div class="buzzer-explain-item"><div class="buzzer-icon-wrap"><div class="bz-circle bz-blue"></div></div><p><strong>اللون الأزرق:</strong> الزر جاهز! كن مستعداً للضغط فور سماع السؤال.</p></div>
-          <div class="buzzer-explain-item"><div class="buzzer-icon-wrap"><div class="bz-circle bz-green"></div></div><p><strong>اللون الأخضر:</strong> أنت الأسرع! المايك لك لتقديم الإجابة.</p></div>
+          <div class="buzzer-explain-item"><div class="buzzer-icon-wrap"><div class="bz-circle bz-green"></div></div><p><strong>اللون الأخضر:</strong> أنت الأسرع! المايك لك لتقديم الإجابة، ولديك 3 ثوانٍ فقط (يظهر العدّاد للجميع وعند انتهائه يرن الجرس).</p></div>
           <div class="buzzer-explain-item"><div class="buzzer-icon-wrap"><div class="bz-circle bz-orange"></div></div><p><strong>اللون البرتقالي:</strong> مقفل! هناك لاعب آخر سبقك بالضغط.</p></div>
           <div class="buzzer-explain-item"><div class="buzzer-icon-wrap"><div class="bz-circle bz-red"></div></div><p><strong>اللون الأحمر:</strong> انتهى الوقت المخصص للإجابة.</p></div>
-          <div class="buzzer-explain-item"><div class="buzzer-icon-wrap"><div class="bz-circle bz-white-num">10</div></div><p><strong>الزر الأبيض (10):</strong> فرصة ثانية! يُفعَّل بعد إجابة خاطئة أو انتهاء وقت اللاعب الأول، ليُفتح المجال للفريق الآخر للإجابة خلال 10 ثوانٍ.</p></div>
+          <div class="buzzer-explain-item"><div class="buzzer-icon-wrap"><div class="bz-circle bz-white-num">10</div></div><p><strong>الزر الأبيض (10):</strong> فرصة ثانية! عندما يفتحها المنظم يمكن للفريق الآخر الضغط، ويبدأ عدّاد 10 ثوانٍ لأول من يضغط منهم.</p></div>
         </div>
       </div>
       <button class="btn btn-secondary btn-full close-btn" onclick="closeHowToPlay()">إغلاق الشرح</button>
@@ -456,6 +463,7 @@
     <span>تواصل معنا</span>
   </button>
 
+  <div id="countdownBox" class="countdown" style="display:none;"></div>
   <div id="toast" class="toast"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
