@@ -1,409 +1,840 @@
-const fullAlphabet = [
-  'أ', 'ب', 'ت', 'ث', 'ج', 'ح', 'خ',
-  'د', 'ذ', 'ر', 'ز', 'س', 'ش', 'ص',
-  'ض', 'ط', 'ظ', 'ع', 'غ', 'ف', 'ق',
-  'ك', 'ل', 'م', 'ن', 'هـ', 'و', 'ي'
-];
+/* =====================  أدوات عامة  ===================== */
+const $ = id => document.getElementById(id);
+const ALPHABET = ["أ","ب","ت","ث","ج","ح","خ","د","ذ","ر","ز","س","ش","ص","ض","ط","ظ","ع","غ","ف","ق","ك","ل","م","ن","هـ","و","ي"];
+const ROUND_NAMES = ["","الأولى","الثانية","الثالثة","الرابعة","الخامسة","السادسة","السابعة","الثامنة","التاسعة","العاشرة"];
+const TEAM_AR = { green: "الأخضر", orange: "البرتقالي" };
+const ANSWER_SECONDS = 10;
+const SECOND_SECONDS = 10;
+const MAX_PLAYERS = 40;
 
-let currentLetter = '';
-let currentAnswer = '';
-let selectedTileElement = null;
-let currentRound = 1;
-let score1 = 0;
-let score2 = 0;
-let countdown;
-let timerSeconds = 0;
+let soundEnabled = true;
+let audioCtx = null;
 
-let team1Color = '#71bf43';
-let team2Color = '#f58220';
-let boardState = Array(5).fill(null).map(() => Array(5).fill(0));
+function toast(msg) {
+  const t = $("toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => t.classList.remove("show"), 2200);
+}
 
-let peer = null;
-let peerId = '';
+function playSound(type) {
+  if (!soundEnabled) return;
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === "suspended") audioCtx.resume();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain); gain.connect(audioCtx.destination);
+    const t = audioCtx.currentTime;
+    if (type === "click") {
+      osc.frequency.setValueAtTime(440, t);
+      gain.gain.setValueAtTime(0.1, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
+      osc.start(); osc.stop(t + 0.1);
+    } else if (type === "score") {
+      osc.frequency.setValueAtTime(587.33, t);
+      osc.frequency.setValueAtTime(880, t + 0.08);
+      gain.gain.setValueAtTime(0.15, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
+      osc.start(); osc.stop(t + 0.3);
+    } else if (type === "buzz") {
+      osc.type = "square";
+      osc.frequency.setValueAtTime(220, t);
+      gain.gain.setValueAtTime(0.12, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+      osc.start(); osc.stop(t + 0.35);
+    }
+  } catch (e) { /* ignore */ }
+}
 
-// توليد الباركود تلقائياً في الشاشة الرئيسية
-window.addEventListener('DOMContentLoaded', () => {
-  const qrElem = document.getElementById("gameQRCode");
-  if (qrElem) {
-    qrElem.innerHTML = "";
-    new QRCode(qrElem, {
-      text: window.location.href,
-      width: 120,
-      height: 120,
-      colorDark: "#1a0628",
-      colorLight: "#ffffff"
-    });
+function toggleSound() {
+  soundEnabled = !soundEnabled;
+  $("soundToggleBtn").textContent = soundEnabled ? "كتم أصوات اللعبة 🔊" : "تشغيل الأصوات 🔇";
+  playSound("click");
+}
+
+function show(id, display = "flex") { $(id).style.display = display; }
+function hide(id) { $(id).style.display = "none"; }
+const uid = () => Math.random().toString(36).slice(2, 10);
+
+/* =====================  الحالة  ===================== */
+const G = {
+  size: 5, mode: "both", target: 2, round: 1,
+  score: { green: 0, orange: 0 },
+  grid: [], sel: null, history: [], pendingWinner: null
+};
+
+const R = {            // حالة المنظم / الغرفة
+  code: null, ch: null, tick: null, url: "",
+  players: {}, kicked: new Set(),
+  phase: "ready", winnerId: null, secondTeam: null, deadline: 0,
+  menuPlayerId: null, lastBroadcast: 0
+};
+
+const P = {            // حالة اللاعب
+  id: null, name: "", team: "green", ch: null, state: null, joined: false, timer: null
+};
+
+let selectedJoinTeam = "green";
+
+/* =====================  البداية  ===================== */
+document.addEventListener("DOMContentLoaded", () => {
+  const bg = $("bgPattern");
+  for (let i = 0; i < 90; i++) {
+    const s = document.createElement("span");
+    s.textContent = ALPHABET[Math.floor(Math.random() * ALPHABET.length)];
+    bg.appendChild(s);
   }
+  const room = new URLSearchParams(location.search).get("room");
+  if (room) { $("roomCode").value = room; openJoinRoom(); }
+  document.addEventListener("click", () => { if (audioCtx && audioCtx.state === "suspended") audioCtx.resume(); }, { once: true });
 });
 
-function goToSettings() {
-  document.getElementById('introScreen').classList.add('hidden');
-  document.getElementById('settingsScreen').classList.remove('hidden');
+
+/* =====================  الاتصال بين الأجهزة (PeerJS / WebRTC)  =====================
+   المنظم = Peer معرّفه 7rof-رمز_الغرفة، واللاعبون يتصلون به مباشرة.
+   إن لم تُحمَّل المكتبة يعود للعمل بين تبويبات نفس المتصفح فقط. */
+function makeOrganizerChannel(code) {
+  if (typeof Peer === "undefined") return new BroadcastChannel("7rof_" + code);
+  const conns = new Set();
+  const ch = {
+    onmessage: null,
+    postMessage(m) { conns.forEach(c => { if (c.open) { try { c.send(m); } catch (e) { /* ignore */ } } }); },
+    close() { try { peer.destroy(); } catch (e) { /* ignore */ } }
+  };
+  const peer = new Peer("7rof-" + code);
+  peer.on("connection", c => {
+    conns.add(c);
+    c.on("data", d => { if (ch.onmessage) ch.onmessage({ data: d }); });
+    c.on("close", () => conns.delete(c));
+  });
+  peer.on("error", e => { if (e.type === "unavailable-id") toast("رمز الغرفة مستخدم، أغلق الغرفة وأنشئ غرفة جديدة"); });
+  return ch;
 }
 
-function openSettings() {
-  document.getElementById('mainGame').classList.add('hidden');
-  document.getElementById('settingsScreen').classList.remove('hidden');
+function makePlayerChannel(code) {
+  if (typeof Peer === "undefined") return new BroadcastChannel("7rof_" + code);
+  const queue = []; let conn = null;
+  const ch = {
+    onmessage: null,
+    postMessage(m) { if (conn && conn.open) conn.send(m); else queue.push(m); },
+    close() { try { peer.destroy(); } catch (e) { /* ignore */ } }
+  };
+  const peer = new Peer();
+  peer.on("open", () => {
+    conn = peer.connect("7rof-" + code, { reliable: true });
+    conn.on("open", () => queue.splice(0).forEach(m => conn.send(m)));
+    conn.on("data", d => { if (ch.onmessage) ch.onmessage({ data: d }); });
+  });
+  peer.on("error", () => { /* يُعالج بمهلة الانضمام */ });
+  return ch;
 }
 
+/* =====================  إنشاء الغرفة  ===================== */
+function openCreateRoom() {
+  playSound("click");
+  if (!R.code) createRoom();
+  renderRoomModal();
+  show("createRoomModal");
+}
+
+function createRoom() {
+  R.code = String(Math.floor(100000 + Math.random() * 900000));
+  R.players = {}; R.kicked = new Set();
+  resetBuzzState();
+  R.url = location.href.split(/[?#]/)[0] + "?room=" + R.code;
+  if (location.protocol === "file:") toast("افتح الموقع من رابط الاستضافة (GitHub Pages) ليعمل الباركود على جوالات اللاعبين");
+  R.ch = makeOrganizerChannel(R.code);
+  R.ch.onmessage = e => onOrganizerMessage(e.data);
+  R.tick = setInterval(organizerTick, 250);
+}
+
+function renderRoomModal() {
+  $("roomCodeDisplay").textContent = R.code;
+  const qrEl = $("qrcode");
+  qrEl.innerHTML = "";
+  if (typeof QRCode !== "undefined") {
+    new QRCode(qrEl, { text: R.url, width: 130, height: 130, colorDark: "#3b195c", colorLight: "#ffffff", correctLevel: QRCode.CorrectLevel.H });
+  }
+  renderRoomPlayers();
+}
+
+function renderRoomPlayers() {
+  const list = Object.values(R.players);
+  if ($("roomPlayersCount")) $("roomPlayersCount").textContent = `${list.length}/${MAX_PLAYERS}`;
+  $("roomPlayersEmpty").style.display = list.length ? "none" : "block";
+  $("roomPlayersList").innerHTML = list.map(p => `<span class="rp-chip ${p.team}">${escapeHtml(p.name)}</span>`).join("");
+}
+
+function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+
+function copyRoomLink() {
+  playSound("click");
+  const done = () => toast("تم نسخ رابط الغرفة بنجاح!");
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(R.url).then(done).catch(() => toast("تعذر نسخ الرابط تلقائياً."));
+  } else toast("تعذر نسخ الرابط تلقائياً.");
+}
+
+function closeCreateRoom() { playSound("click"); hide("createRoomModal"); }
+
+function closeRoom() {
+  playSound("click");
+  if (R.ch) { R.ch.postMessage({ t: "closed" }); R.ch.close(); R.ch = null; }
+  clearInterval(R.tick);
+  R.code = null; R.players = {}; R.kicked = new Set();
+  hide("createRoomModal");
+}
+
+function toggleSection(bodyId, arrowId) {
+  playSound("click");
+  const body = $(bodyId), arrow = $(arrowId);
+  const isHidden = body.style.display === "none";
+  body.style.display = isHidden ? "flex" : "none";
+  arrow.textContent = isHidden ? "▼" : "▲";
+}
+
+function setActive(ids, activeId) {
+  ids.forEach(i => $(i).classList.toggle("active", i === activeId));
+}
+function selectOption(id) {
+  playSound("click");
+  setActive(["mode1", "mode2", "mode3"], id);
+  G.mode = id === "mode1" ? "both" : id === "mode2" ? "buttons" : "cells";
+}
+function selectGrid(id) {
+  playSound("click");
+  setActive(["grid3", "grid4", "grid5"], id);
+  G.size = id === "grid3" ? 3 : id === "grid4" ? 4 : 5;
+}
+function selectRound(n) {
+  playSound("click");
+  G.target = n;
+  setActive(["round1", "round2", "round3"], n === 3 ? "round1" : n === 2 ? "round2" : "round3");
+}
+
+/* =====================  بدء اللعبة  ===================== */
 function startGame() {
-  const t1Name = document.getElementById('team1NameInput').value || 'الفريق الأول';
-  const t2Name = document.getElementById('team2NameInput').value || 'الفريق الثاني';
-  team1Color = document.getElementById('team1ColorInput').value;
-  team2Color = document.getElementById('team2ColorInput').value;
-
-  document.getElementById('team1Label').innerText = t1Name;
-  document.getElementById('team2Label').innerText = t2Name;
-  document.getElementById('assignT1Label').innerText = t1Name;
-  document.getElementById('assignT2Label').innerText = t2Name;
-
-  document.documentElement.style.setProperty('--team1-color', team1Color);
-  document.documentElement.style.setProperty('--team2-color', team2Color);
-
-  document.getElementById('team1Row').style.backgroundColor = team1Color;
-  document.getElementById('team2Row').style.backgroundColor = team2Color;
-
-  document.getElementById('settingsScreen').classList.add('hidden');
-  document.getElementById('mainGame').classList.remove('hidden');
-
-  initRound();
-  initPeerConnection();
+  playSound("score");
+  if (!R.code) createRoom();
+  hide("createRoomModal");
+  hide("mainMenuCard");
+  G.score = { green: 0, orange: 0 };
+  G.round = 1;
+  updateScoreUI();
+  applyModeLayout();
+  resetBuzzState();
+  broadcastState();
+  showRoundTransitionScreen();
 }
 
-/* ربط الهواتف عبر PeerJS بدون حاجة لسيرفر */
-function initPeerConnection() {
-  peerId = 'horof-' + Math.floor(1000 + Math.random() * 9000);
-  peer = new Peer(peerId);
-
-  peer.on('open', (id) => {
-    document.getElementById('roomCodeDisplay').innerText = `كود ربط الهواتف: ${id}`;
-  });
-
-  peer.on('connection', (conn) => {
-    conn.on('data', (data) => {
-      if (data && data.type === 'press_buzzer') {
-        handleBuzzerPress(data.team, data.playerName);
-      }
-    });
-  });
+function applyModeLayout() {
+  $("boardFrame").style.display = G.mode === "buttons" ? "none" : "flex";
+  $("playersPanel").style.display = G.mode === "cells" ? "none" : "block";
+  $("scoreHint").style.display = G.mode === "buttons" ? "none" : "block";
+  $("clearCellBtn").style.display = G.mode === "buttons" ? "none" : "block";
+  renderPlayersPanel();
 }
 
-function handleBuzzerPress(teamNumber, playerName) {
-  const tName = teamNumber == 1 ? document.getElementById('team1NameInput').value : document.getElementById('team2NameInput').value;
-  const pName = playerName ? ` [${playerName}]` : '';
-  
-  playVictorySound();
-  alert(`🔔 الضغطة من: ${tName}${pName} - يبدأ مؤقت 3 ثوانٍ!`);
-  
-  startTimer(3);
+function updateScoreUI() {
+  $("greenScoreVal").textContent = G.score.green;
+  $("orangeScoreVal").textContent = G.score.orange;
+}
 
-  setTimeout(() => {
-    if (timerSeconds <= 0) {
-      const otherTeam = teamNumber == 1 ? 2 : 1;
-      const otherName = otherTeam == 1 ? document.getElementById('team1NameInput').value : document.getElementById('team2NameInput').value;
-      alert(`⌛ انتهى الوقت! تحولت الأحقية لـ: (${otherName}) - 10 ثوانٍ!`);
-      startTimer(10);
+function showRoundTransitionScreen() {
+  $("roundTitleText").textContent = `الجولة ${ROUND_NAMES[G.round] || G.round}`;
+  show("roundTransitionScreen");
+  hide("gameScreen");
+}
+
+function startActualRound() {
+  playSound("click");
+  hide("roundTransitionScreen");
+  show("gameScreen");
+  $("currentRoundBadge").textContent = `الجولة ${ROUND_NAMES[G.round] || G.round}`;
+  buildHexGrid(G.size);
+}
+
+/* =====================  الخلية السداسية  ===================== */
+function buildHexGrid(size) {
+  const wrapper = $("hexGridWrapper");
+  wrapper.innerHTML = "";
+  G.sel = null; G.history = []; G.pendingWinner = null;
+  document.body.classList.remove("has-selection");
+
+  const letters = [...ALPHABET].sort(() => Math.random() - 0.5).slice(0, size * size);
+  G.grid = [];
+  let k = 0;
+  for (let r = 0; r < size; r++) {
+    const row = document.createElement("div");
+    row.className = "hex-row" + (r % 2 === 1 ? " offset-row" : "");
+    G.grid[r] = [];
+    for (let c = 0; c < size; c++) {
+      G.grid[r][c] = { letter: letters[k++], state: "normal" };
+      const hex = document.createElement("div");
+      hex.className = "hex";
+      hex.dataset.r = r; hex.dataset.c = c;
+      hex.innerHTML = `<div class="hex-in">${G.grid[r][c].letter}</div>`;
+      hex.onclick = () => onCellClick(r, c);
+      row.appendChild(hex);
     }
-  }, 3200);
-}
-
-function shuffle(array) {
-  return array.sort(() => Math.random() - 0.5);
-}
-
-function initRound() {
-  const gridContainer = document.getElementById('hexGrid');
-  gridContainer.innerHTML = '';
-  boardState = Array(5).fill(null).map(() => Array(5).fill(0));
-
-  const roundLetters = shuffle([...fullAlphabet]).slice(0, 25);
-
-  let index = 0;
-  for (let r = 0; r < 5; r++) {
-    const row = document.createElement('div');
-    row.className = 'hex-row';
-
-    for (let c = 0; c < 5; c++) {
-      if (index >= roundLetters.length) break;
-      const letter = roundLetters[index];
-
-      const svgNS = "http://www.w3.org/2000/svg";
-      const svg = document.createElementNS(svgNS, "svg");
-      svg.setAttribute("viewBox", "0 0 100 115");
-      svg.setAttribute("class", "hex-svg");
-      svg.dataset.row = r;
-      svg.dataset.col = c;
-
-      const polygon = document.createElementNS(svgNS, "polygon");
-      polygon.setAttribute("points", "50,5 95,30 95,85 50,110 5,85 5,30");
-
-      const text = document.createElementNS(svgNS, "text");
-      text.setAttribute("x", "50%");
-      text.setAttribute("y", "55%");
-      text.setAttribute("text-anchor", "middle");
-      text.setAttribute("dominant-baseline", "middle");
-      text.setAttribute("class", "hex-text");
-      text.textContent = letter;
-
-      svg.appendChild(polygon);
-      svg.appendChild(text);
-
-      svg.onclick = () => selectLetter(letter, svg);
-
-      row.appendChild(svg);
-      index++;
-    }
-    gridContainer.appendChild(row);
+    wrapper.appendChild(row);
   }
 }
 
-function selectLetter(letter, element) {
-  document.querySelectorAll('.hex-svg.selected').forEach(el => el.classList.remove('selected'));
+function cellEl(r, c) { return document.querySelector(`#hexGridWrapper .hex[data-r="${r}"][data-c="${c}"]`); }
 
-  currentLetter = letter;
-  selectedTileElement = element;
-  document.getElementById('currentLetterBadge').innerText = letter;
-
-  // السماح بتحديد الخلية حتى لو كانت ملونة مسبقاً لتعديلها
-  element.classList.add('selected');
-
-  document.getElementById('teamAssignButtons').style.display = 'flex';
-  loadQuestion(letter);
+function refreshCell(r, c) {
+  const el = cellEl(r, c);
+  if (!el) return;
+  const st = G.grid[r][c].state;
+  el.classList.remove("green", "orange", "sel");
+  if (st === "green") el.classList.add("green");
+  if (st === "orange") el.classList.add("orange");
+  if (G.sel && G.sel.r === r && G.sel.c === c) el.classList.add("sel");
 }
 
-function assignTileToTeam(teamNumber) {
-  if (!selectedTileElement) return;
+function setSelection(sel) {
+  const old = G.sel;
+  G.sel = sel;
+  if (old) refreshCell(old.r, old.c);
+  if (sel) refreshCell(sel.r, sel.c);
+  document.body.classList.toggle("has-selection", !!sel);
+}
 
-  const r = parseInt(selectedTileElement.dataset.row);
-  const c = parseInt(selectedTileElement.dataset.col);
+function onCellClick(r, c) {
+  playSound("click");
+  if (G.sel && G.sel.r === r && G.sel.c === c) setSelection(null);
+  else setSelection({ r, c });
+}
 
-  // إزالة أي حالة سابقة للخلية وتحديث مصفوفة اللوحة
-  selectedTileElement.classList.remove('selected', 'team1', 'team2');
-  boardState[r][c] = 0;
+/* تلوين الخلية المحددة لفريق */
+function colorSelectedCell(team) {
+  if (!G.sel) { toast("اختر حرفاً من الخلية أولاً بالضغط عليه"); return; }
+  playSound("score");
+  const { r, c } = G.sel;
+  G.history.push({ r, c, prev: G.grid[r][c].state, team });
+  G.grid[r][c].state = team;
+  setSelection(null);
+  refreshCell(r, c);
+  const el = cellEl(r, c);
+  if (el) el.classList.add("pulse");
 
-  if (teamNumber === 1) {
-    selectedTileElement.classList.add('team1');
-    boardState[r][c] = 1;
-    playVictorySound();
-    triggerConfetti();
-    checkWinningPath(1);
-  } else if (teamNumber === 2) {
-    selectedTileElement.classList.add('team2');
-    boardState[r][c] = 2;
-    playVictorySound();
-    triggerConfetti();
-    checkWinningPath(2);
-  } else {
-    // إذا كان الخيار 0 (عند الضغط على زر 🔀 لتفريغ الخلية وإلغاء تلوينها للتعديل)
-    selectedTileElement.classList.remove('selected');
+  if (checkWin(team)) {
+    G.pendingWinner = team;
+    setTimeout(() => triggerWinModal(team), 500);
   }
 }
 
-/* 🏆 خوارزمية فحص مسار الفوز الشاملة من جميع النواحي والزوايا والمسارات المتعرجة والطولية والعرضية */
-function checkWinningPath(team) {
-  if (checkAnyPath(team)) {
-    const tName = team === 1 ? document.getElementById('team1NameInput').value : document.getElementById('team2NameInput').value;
-    addScore(team);
-    showWinnerModal(tName);
-  }
+/*
+  الجوار (الصفوف الفردية مزاحة نصف خلية لليمين، العرض LTR):
+  صف زوجي (r%2==0): الصف المجاور يحوي c-1 و c
+  صف فردي: الصف المجاور يحوي c و c+1
+*/
+function neighbors(r, c, n) {
+  const out = [[r, c - 1], [r, c + 1]];
+  const adj = (r % 2 === 0) ? [c - 1, c] : [c, c + 1];
+  adj.forEach(cc => { out.push([r - 1, cc]); out.push([r + 1, cc]); });
+  return out.filter(([a, b]) => a >= 0 && a < n && b >= 0 && b < n);
 }
 
-function checkAnyPath(team) {
-  // 1. فحص الاتصال من الحافة العلوية (الصف 0) إلى الحافة السفلية (الصف 4) بأي مسار (طولي، زاوي، أو متعرج)
-  let visitedTopToBottom = Array(5).fill(null).map(() => Array(5).fill(false));
-  let queueTopToBottom = [];
-
-  for (let c = 0; c < 5; c++) {
-    if (boardState[0][c] === team) {
-      queueTopToBottom.push([0, c]);
-      visitedTopToBottom[0][c] = true;
+/* الأخضر: من أعلى لأسفل — البرتقالي: من اليمين لليسار */
+function checkWin(team) {
+  const n = G.grid.length;
+  const seen = Array.from({ length: n }, () => Array(n).fill(false));
+  const queue = [];
+  for (let i = 0; i < n; i++) {
+    const [r, c] = team === "green" ? [0, i] : [i, 0];
+    if (G.grid[r][c].state === team) { seen[r][c] = true; queue.push([r, c]); }
+  }
+  while (queue.length) {
+    const [r, c] = queue.shift();
+    if (team === "green" && r === n - 1) return true;
+    if (team === "orange" && c === n - 1) return true;
+    for (const [a, b] of neighbors(r, c, n)) {
+      if (!seen[a][b] && G.grid[a][b].state === team) { seen[a][b] = true; queue.push([a, b]); }
     }
   }
-
-  while (queueTopToBottom.length > 0) {
-    let [r, c] = queueTopToBottom.shift();
-    if (r === 4) return true;
-
-    for (let [nr, nc] of getHexNeighbors(r, c)) {
-      if (nr >= 0 && nr < 5 && nc >= 0 && nc < 5 && !visitedTopToBottom[nr][nc] && boardState[nr][nc] === team) {
-        visitedTopToBottom[nr][nc] = true;
-        queueTopToBottom.push([nr, nc]);
-      }
-    }
-  }
-
-  // 2. فحص الاتصال من الحافة اليمنى (العمود 4) إلى الحافة اليسرى (العمود 0) بأي مسار (عرضي، زاوي، أو متعرج)
-  let visitedLeftToRight = Array(5).fill(null).map(() => Array(5).fill(false));
-  let queueLeftToRight = [];
-
-  for (let r = 0; r < 5; r++) {
-    if (boardState[r][0] === team) {
-      queueLeftToRight.push([r, 0]);
-      visitedLeftToRight[r][0] = true;
-    }
-  }
-
-  while (queueLeftToRight.length > 0) {
-    let [r, c] = queueLeftToRight.shift();
-    if (c === 4) return true;
-
-    for (let [nr, nc] of getHexNeighbors(r, c)) {
-      if (nr >= 0 && nr < 5 && nc >= 0 && nc < 5 && !visitedLeftToRight[nr][nc] && boardState[nr][nc] === team) {
-        visitedLeftToRight[nr][nc] = true;
-        queueLeftToRight.push([nr, nc]);
-      }
-    }
-  }
-
   return false;
 }
 
-// دالة تحديد الخلايا المجاورة بدقة للشبكة السداسية (Hexagon Grid Neighbors)
-function getHexNeighbors(r, c) {
-  if (r % 2 === 0) {
-    return [
-      [r-1, c-1], [r-1, c], 
-      [r, c-1],   [r, c+1], 
-      [r+1, c-1], [r+1, c]
-    ];
-  } else {
-    return [
-      [r-1, c],   [r-1, c+1], 
-      [r, c-1],   [r, c+1], 
-      [r+1, c],   [r+1, c+1]
-    ];
+/* =====================  نافذة الفوز  ===================== */
+function triggerWinModal(team) {
+  playSound("score");
+  const name = team === "green" ? "الأخضر" : "البرتقالي";
+  $("winModalTitle").textContent = `الفريق ${name} فاز بالجولة!`;
+  $("winModalTitle").style.color = team === "green" ? "#5be37d" : "#ff9a1f";
+  $("winModalSub").textContent = `هل تريد حفظ النتيجة والذهاب للجولة ${ROUND_NAMES[G.round + 1] || (G.round + 1)}؟`;
+
+  const clone = $("boardFrame").cloneNode(true);
+  clone.removeAttribute("id");
+  clone.querySelectorAll("[id]").forEach(e => e.removeAttribute("id"));
+  clone.querySelectorAll(".hex").forEach(h => { h.onclick = null; h.classList.remove("sel", "pulse"); });
+  clone.style.display = "flex";
+  $("winMiniGrid").innerHTML = "";
+  $("winMiniGrid").appendChild(clone);
+  show("winModal");
+}
+
+function cancelLastMove() {
+  playSound("click");
+  hide("winModal");
+  const last = G.history.pop();
+  if (last) {
+    G.grid[last.r][last.c].state = last.prev;
+    refreshCell(last.r, last.c);
+  }
+  G.pendingWinner = null;
+}
+
+function saveAndNextRound() {
+  playSound("click");
+  hide("winModal");
+  const team = G.pendingWinner;
+  G.pendingWinner = null;
+  if (!team) return;
+  G.score[team]++;
+  updateScoreUI();
+  if (G.score[team] >= G.target) {
+    $("finalTitle").textContent = `🏆 الفريق ${TEAM_AR[team]} فاز بالمباراة!`;
+    $("finalTitle").style.color = team === "green" ? "#5be37d" : "#ff9a1f";
+    $("finalSub").textContent = `النتيجة النهائية: الأخضر ${G.score.green} - البرتقالي ${G.score.orange}`;
+    show("finalModal");
+    return;
+  }
+  G.round++;
+  resetBuzzState();
+  broadcastState();
+  showRoundTransitionScreen();
+}
+
+function finishMatch() {
+  playSound("click");
+  hide("finalModal");
+  backToRoom();
+}
+
+/* =====================  مسح الخلية  ===================== */
+function openClearOptions() { playSound("click"); show("clearOptionsModal"); }
+function closeClearOptions() { playSound("click"); hide("clearOptionsModal"); }
+
+function executeClear(redistribute) {
+  playSound("click");
+  hide("clearOptionsModal");
+  if (redistribute) buildHexGrid(G.size);
+  else {
+    G.sel = null; G.history = []; G.pendingWinner = null;
+    document.body.classList.remove("has-selection");
+    G.grid.forEach((row, r) => row.forEach((cell, c) => { cell.state = "normal"; refreshCell(r, c); }));
   }
 }
 
-function showWinnerModal(teamName) {
-  document.getElementById('winnerTeamName').innerText = `🏆 مبروك للفريق الفائز (${teamName}) 🏆`;
-  document.getElementById('winnerModal').classList.remove('hidden');
+function backToRoom() {
+  playSound("click");
+  hide("gameScreen"); hide("roundTransitionScreen"); hide("winModal");
+  document.body.classList.remove("has-selection");
+  G.score = { green: 0, orange: 0 }; G.round = 1; updateScoreUI();
+  show("mainMenuCard", "block");
+  if (R.code) { renderRoomModal(); show("createRoomModal"); }
 }
 
-function closeWinnerModal() {
-  document.getElementById('winnerModal').classList.add('hidden');
+/* =====================  البازر: حالة المنظم  ===================== */
+function resetBuzzState() {
+  R.phase = "ready"; R.winnerId = null; R.secondTeam = null; R.deadline = 0;
 }
 
-function loadQuestion(letter) {
-  const answerText = document.getElementById('answerText');
-  const showAnswerBtn = document.getElementById('showAnswerBtn');
-  const newQuestionBtn = document.getElementById('newQuestionBtn');
+function resetButtons() {
+  playSound("click");
+  resetBuzzState();
+  organizerUpdate();
+}
 
-  answerText.classList.add('hidden');
-  showAnswerBtn.innerText = 'عرض الإجابة';
+function resetSecondChance() {
+  playSound("click");
+  const w = R.players[R.winnerId];
+  if (!w) { toast("لا يوجد لاعب ضغط الزر بعد"); return; }
+  R.secondTeam = w.team === "green" ? "orange" : "green";
+  R.phase = "second";
+  R.deadline = Date.now() + SECOND_SECONDS * 1000;
+  organizerUpdate();
+}
 
-  const bank = typeof questionBank !== 'undefined' ? questionBank : null;
-  const list = bank ? bank[letter] : null;
+function startAnswering(id) {
+  R.phase = "answering"; R.winnerId = id; R.secondTeam = null;
+  R.deadline = Date.now() + ANSWER_SECONDS * 1000;
+  playSound("buzz");
+  organizerUpdate();
+}
 
-  if (list && list.length > 0) {
-    const randomIndex = Math.floor(Math.random() * list.length);
-    const selectedItem = list[randomIndex];
+function handlePress(id) {
+  const p = R.players[id];
+  if (!p) return;
+  if (R.phase === "ready") startAnswering(id);
+  else if (R.phase === "second" && p.team === R.secondTeam) startAnswering(id);
+}
 
-    const match = selectedItem.match(/(.*?)\s*\((.*?)\)/);
-    if (match) {
-      document.getElementById('questionText').innerText = match[1];
-      currentAnswer = match[2];
-      showAnswerBtn.style.display = 'block';
-      newQuestionBtn.style.display = 'block';
-      answerText.innerText = `الإجابة: ${currentAnswer}`;
-    } else {
-      document.getElementById('questionText').innerText = selectedItem;
-      showAnswerBtn.style.display = 'none';
-      newQuestionBtn.style.display = 'block';
+function organizerTick() {
+  const now = Date.now();
+  let changed = false;
+  if (R.phase === "answering" && now > R.deadline) { R.phase = "expired"; changed = true; }
+  else if (R.phase === "second" && now > R.deadline) { R.phase = "closed"; changed = true; }
+  if (changed) organizerUpdate();
+  else if (now - R.lastBroadcast > 1000) broadcastState();
+}
+
+function organizerUpdate() {
+  renderPlayersPanel();
+  renderRoomPlayers();
+  broadcastState();
+}
+
+function broadcastState() {
+  if (!R.ch) return;
+  R.lastBroadcast = Date.now();
+  R.ch.postMessage({
+    t: "state", room: R.code, players: Object.values(R.players), kicked: [...R.kicked],
+    phase: R.phase, winnerId: R.winnerId, secondTeam: R.secondTeam, deadline: R.deadline
+  });
+}
+
+function onOrganizerMessage(m) {
+  if (!m) return;
+  if (m.t === "join") {
+    if (R.kicked.has(m.id)) { broadcastState(); return; }
+    if (!R.players[m.id] && Object.keys(R.players).length >= MAX_PLAYERS) return;
+    const isNew = !R.players[m.id];
+    R.players[m.id] = { id: m.id, name: String(m.name).slice(0, 14), team: m.team === "orange" ? "orange" : "green" };
+    if (isNew) playSound("click");
+    organizerUpdate();
+  } else if (m.t === "press") handlePress(m.id);
+  else if (m.t === "leave") { delete R.players[m.id]; organizerUpdate(); }
+}
+
+/* حالة زر لاعب بحسب حالة الغرفة (يُستخدم عند المنظم واللاعب) */
+function buzzStateFor(state, p, now) {
+  const mine = state.winnerId === p.id;
+  const secs = Math.max(0, Math.ceil((state.deadline - now) / 1000));
+  switch (state.phase) {
+    case "ready": return { cls: "blue", label: "", text: "جاهز! اضغط عند معرفة الإجابة", canPress: true };
+    case "answering": return mine
+      ? { cls: "green", label: String(secs), text: "أنت الأسرع! أجب الآن", canPress: false }
+      : { cls: "orange", label: "", text: "مقفل — سبقك لاعب آخر", canPress: false };
+    case "expired": return mine
+      ? { cls: "red", label: "", text: "انتهى الوقت", canPress: false }
+      : { cls: "orange", label: "", text: "مقفل", canPress: false };
+    case "second":
+      if (p.team === state.secondTeam) return { cls: "white", label: String(secs), text: "فرصة ثانية! اضغط الآن", canPress: true };
+      return mine ? { cls: "red", label: "", text: "انتهى الوقت", canPress: false } : { cls: "orange", label: "", text: "مقفل", canPress: false };
+    case "closed": return { cls: "red", label: "", text: "انتهى الوقت", canPress: false };
+  }
+  return { cls: "blue", label: "", text: "", canPress: false };
+}
+
+/* لوحة اللاعبين عند المنظم */
+function renderPlayersPanel() {
+  const list = Object.values(R.players);
+  $("playersCountTxt").textContent = list.length;
+  const now = Date.now();
+  const st = { phase: R.phase, winnerId: R.winnerId, secondTeam: R.secondTeam, deadline: R.deadline };
+  $("playerBubbles").innerHTML = "";
+  list.forEach(p => {
+    const b = buzzStateFor(st, p, now);
+    const btn = document.createElement("button");
+    btn.className = `pb team-${p.team}`;
+    btn.innerHTML = `<div class="pb-circle st-${b.cls}">${b.label}</div><span class="pb-name">${escapeHtml(p.name)}</span>`;
+    btn.onclick = () => onPlayerBubbleClick(p.id);
+    $("playerBubbles").appendChild(btn);
+  });
+}
+
+setInterval(() => { if (R.code && (R.phase === "answering" || R.phase === "second")) renderPlayersPanel(); }, 500);
+
+function onPlayerBubbleClick(id) {
+  const p = R.players[id];
+  if (!p) return;
+  if (G.sel) { colorSelectedCell(p.team); return; }   // أثناء تحديد حرف: احتساب النقطة لفريقه
+  R.menuPlayerId = id;
+  $("playerMenuName").textContent = p.name;
+  show("playerMenuModal");
+}
+function closePlayerMenu() { playSound("click"); hide("playerMenuModal"); }
+function changePlayerTeam() {
+  const p = R.players[R.menuPlayerId];
+  if (p) p.team = p.team === "green" ? "orange" : "green";
+  hide("playerMenuModal"); organizerUpdate();
+}
+function kickPlayer() {
+  if (R.menuPlayerId) { R.kicked.add(R.menuPlayerId); delete R.players[R.menuPlayerId]; }
+  if (R.winnerId === R.menuPlayerId) R.winnerId = null;
+  hide("playerMenuModal"); organizerUpdate();
+}
+
+/* =====================  الانضمام كلاعب  ===================== */
+function openJoinRoom() { playSound("click"); selectTeam(selectedJoinTeam, true); show("joinRoomModal"); }
+function closeJoinRoom() { playSound("click"); hide("joinRoomModal"); }
+
+function selectTeam(team, silent) {
+  if (!silent) playSound("click");
+  selectedJoinTeam = team;
+  $("greenTeamBtn").classList.toggle("active", team === "green");
+  $("orangeTeamBtn").classList.toggle("active", team === "orange");
+}
+
+function enterGame(event) {
+  event.preventDefault();
+  playSound("score");
+  const code = $("roomCode").value.trim();
+  const name = $("playerName").value.trim();
+  if (!code || !name) return;
+
+  P.id = P.id || uid(); P.name = name; P.team = selectedJoinTeam; P.joined = false; P.state = null;
+  if (P.ch) P.ch.close();
+  P.ch = makePlayerChannel(code);
+  P.ch.onmessage = e => onPlayerMessage(e.data);
+  sendJoin();
+  toast("جاري الاتصال بالغرفة...");
+  setTimeout(() => {
+    if (!P.joined) {
+      toast("لم يتم العثور على الغرفة، تأكد من الرمز");
+      if (P.ch) { P.ch.close(); P.ch = null; }
     }
-  } else {
-    document.getElementById('questionText').innerText = 'لا يوجد سؤال متاح لهذا الحرف حالياً.';
-    showAnswerBtn.style.display = 'none';
-    newQuestionBtn.style.display = 'none';
+  }, 8000);
+}
+
+function sendJoin() { if (P.ch) P.ch.postMessage({ t: "join", id: P.id, name: P.name, team: P.team }); }
+
+function onPlayerMessage(m) {
+  if (!m) return;
+  if (m.t === "closed") { toast("تم إغلاق الغرفة"); leaveToMenu(); return; }
+  if (m.t !== "state") return;
+  if (m.kicked && m.kicked.includes(P.id)) { toast("تم طردك من الغرفة"); leaveToMenu(); return; }
+  const me = m.players.find(p => p.id === P.id);
+  if (!me) { if (!P.joined || P.state) sendJoin(); return; }
+  P.state = m; P.team = me.team;
+  if (!P.joined) {
+    P.joined = true;
+    hide("joinRoomModal"); hide("mainMenuCard");
+    show("playerScreen");
+    P.timer = setInterval(renderPlayerScreen, 200);
+  }
+  renderPlayerScreen();
+}
+
+function renderPlayerScreen() {
+  if (!P.state) return;
+  const me = P.state.players.find(p => p.id === P.id) || { id: P.id, team: P.team };
+  $("pScreenName").textContent = P.name;
+  const tag = $("pScreenTeam");
+  tag.textContent = me.team === "green" ? "الفريق الأخضر" : "الفريق البرتقالي";
+  tag.className = "player-team-tag " + me.team;
+  const b = buzzStateFor(P.state, me, Date.now());
+  $("buzzerBtn").className = "buzzer b-" + b.cls;
+  $("buzzerLabel").textContent = b.label;
+  $("buzzerStatus").textContent = b.text;
+}
+
+function playerPress() {
+  if (!P.state || !P.ch) return;
+  const me = P.state.players.find(p => p.id === P.id);
+  if (!me) return;
+  if (!buzzStateFor(P.state, me, Date.now()).canPress) return;
+  playSound("buzz");
+  if (navigator.vibrate) navigator.vibrate(60);
+  P.ch.postMessage({ t: "press", id: P.id });
+}
+
+function playerLeave() {
+  if (P.ch) P.ch.postMessage({ t: "leave", id: P.id });
+  leaveToMenu();
+}
+
+function leaveToMenu() {
+  clearInterval(P.timer);
+  if (P.ch) { P.ch.close(); P.ch = null; }
+  P.joined = false; P.state = null;
+  hide("playerScreen");
+  show("mainMenuCard", "block");
+}
+
+/* =====================  شرح طريقة اللعب  ===================== */
+function openHowToPlay() { playSound("click"); show("howToPlayModal"); }
+function closeHowToPlay() { playSound("click"); hide("howToPlayModal"); }
+function switchTab(tab) {
+  playSound("click");
+  const org = tab === "organizer";
+  $("organizerTabBtn").classList.toggle("active", org);
+  $("playerTabBtn").classList.toggle("active", !org);
+  $("organizerTabContent").classList.toggle("active-content", org);
+  $("playerTabContent").classList.toggle("active-content", !org);
+}
+
+function contactUs() { playSound("click"); toast("تواصل معنا عبر البريد أو وسائل التواصل الخاصة بالموقع"); }
+
+/* =====================  بنك الأسئلة  ===================== */
+const questionsDatabase = (() => {
+  const raw = window.QUESTIONS || {};
+  const out = {};
+  ALPHABET.forEach(l => { out[l] = (raw[l] || []).filter(x => x && x.q && x.q.trim() && x.a && x.a.trim()); });
+  return out;
+})();
+
+let consumedQuestions = {};
+let qbEmail = null, qbName = "";
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+const lsGet = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* ignore */ } };
+const lsDel = k => { try { localStorage.removeItem(k); } catch (e) { /* ignore */ } };
+
+function loadConsumed() {
+  try { consumedQuestions = JSON.parse(lsGet("7rof_consumed_" + qbEmail) || "{}"); } catch (e) { consumedQuestions = {}; }
+  ALPHABET.forEach(l => { if (!Array.isArray(consumedQuestions[l])) consumedQuestions[l] = []; });
+}
+function saveConsumed() { if (qbEmail) lsSet("7rof_consumed_" + qbEmail, JSON.stringify(consumedQuestions)); }
+ALPHABET.forEach(l => { consumedQuestions[l] = []; });
+
+let currentSelectedLetter = "أ";
+let currentActiveQuestion = null;
+
+const totalQuestions = () => ALPHABET.reduce((s, l) => s + questionsDatabase[l].length, 0);
+const consumedCount = () => ALPHABET.reduce((s, l) => s + consumedQuestions[l].filter(q => questionsDatabase[l].some(x => x.q === q)).length, 0);
+
+function openQuestionBank() {
+  playSound("click");
+  show("questionBankModal");
+  const el = $("qbQrCode");
+  el.innerHTML = "";
+  if (typeof QRCode !== "undefined") {
+    new QRCode(el, { text: location.href.split("?")[0], width: 120, height: 120, colorDark: "#1a1a1a", colorLight: "#ffffff", correctLevel: QRCode.CorrectLevel.H });
   }
 }
-
-function changeQuestion() {
-  if (currentLetter) loadQuestion(currentLetter);
+function closeQuestionBankModal() { playSound("click"); hide("questionBankModal"); }
+function enterQuestionBankApp() {
+  playSound("click");
+  hide("questionBankModal");
+  show("questionBankAppModal");
+  const saved = lsGet("7rof_email");
+  if (saved && EMAIL_RE.test(saved)) {
+    qbEmail = saved; qbName = lsGet("7rof_name") || saved.split("@")[0];
+    loadConsumed();
+    hideAllQbViews(); show("qbSplashView", "block");
+    setTimeout(showQbMain, 900);
+  } else { showQbLogin(); }
 }
 
-function toggleAnswer() {
-  const answerText = document.getElementById('answerText');
-  const showAnswerBtn = document.getElementById('showAnswerBtn');
+function showQbLogin() { hideAllQbViews(); $("qbLoginError").textContent = ""; show("qbLoginView", "block"); }
 
-  if (answerText.classList.contains('hidden')) {
-    answerText.classList.remove('hidden');
-    showAnswerBtn.innerText = 'إخفاء الإجابة';
-  } else {
-    answerText.classList.add('hidden');
-    showAnswerBtn.innerText = 'عرض الإجابة';
+function qbLogin(e) {
+  e.preventDefault();
+  const email = $("qbEmailInput").value.trim().toLowerCase();
+  if (!EMAIL_RE.test(email)) { $("qbLoginError").textContent = "الرجاء إدخال بريد إلكتروني صحيح"; return; }
+  playSound("score");
+  qbEmail = email;
+  qbName = $("qbNameInput").value.trim() || email.split("@")[0];
+  lsSet("7rof_email", qbEmail); lsSet("7rof_name", qbName);
+  loadConsumed();
+  hideAllQbViews(); show("qbSplashView", "block");
+  setTimeout(showQbMain, 700);
+}
+
+function qbLogout() {
+  playSound("click");
+  lsDel("7rof_email"); lsDel("7rof_name");
+  qbEmail = null; qbName = "";
+  ALPHABET.forEach(l => { consumedQuestions[l] = []; });
+  $("qbEmailInput").value = "";
+  showQbLogin();
+}
+function closeQbApp() { playSound("click"); hide("questionBankAppModal"); }
+
+function hideAllQbViews() { ["qbSplashView", "qbLoginView", "qbMainView", "qbProfileView", "qbGridView", "qbQuestionView"].forEach(hide); }
+function showQbMain() { hideAllQbViews(); $("qbUserName").textContent = qbName; show("qbMainView", "block"); }
+function showQbProfile() { hideAllQbViews(); $("qbProfileEmail").textContent = qbEmail || "—"; $("qbConsumedTotal").textContent = consumedCount(); show("qbProfileView", "block"); }
+function showQbGrid() { hideAllQbViews(); show("qbGridView", "block"); updateStatsDisplay(); renderQbLettersGrid(); }
+
+function clearQbData() {
+  playSound("click");
+  ALPHABET.forEach(l => consumedQuestions[l] = []);
+  saveConsumed();
+  $("qbConsumedTotal").textContent = 0;
+  toast("تم مسح البيانات");
+}
+
+function updateStatsDisplay() {
+  const total = totalQuestions(), used = consumedCount();
+  $("totalQuestionsCount").textContent = total;
+  $("consumedPercentageVal").textContent = (total ? Math.round(used / total * 100) : 0) + "%";
+}
+
+function letterPercent(l) {
+  const total = questionsDatabase[l].length;
+  if (!total) return 0;
+  const used = consumedQuestions[l].filter(q => questionsDatabase[l].some(x => x.q === q)).length;
+  return Math.round(used / total * 100);
+}
+
+function renderQbLettersGrid() {
+  const box = $("qbLettersContainer");
+  box.innerHTML = "";
+  ALPHABET.forEach(l => {
+    const btn = document.createElement("button");
+    btn.className = "qb-letter-btn";
+    btn.innerHTML = `<span>${l}</span><span class="qb-sub-perc">${letterPercent(l)}%</span>`;
+    btn.onclick = () => selectQbLetter(l);
+    box.appendChild(btn);
+  });
+}
+
+function toggleNoRepeatMode() { playSound("click"); }
+
+function selectQbLetter(letter) {
+  playSound("click");
+  currentSelectedLetter = letter;
+  hideAllQbViews();
+  show("qbQuestionView", "block");
+  $("currentQbLetter").textContent = letter;
+  loadQbQuestion();
+}
+
+function loadQbQuestion() {
+  const l = currentSelectedLetter;
+  const all = questionsDatabase[l];
+  const noRepeat = $("noRepeatToggle").checked;
+  $("qbAnswerBox").style.display = "none";
+  $("toggleAnswerBtn").textContent = "عرض الإجابة";
+  $("letterConsumedPerc").textContent = letterPercent(l) + "%";
+
+  if (!all.length) {
+    $("qbQuestionText").textContent = totalQuestions() === 0
+      ? "لم يتم تحميل ملف الأسئلة. تأكد أن الملف اسمه questions.js (بحرف s) وفي نفس مجلد index.html ثم حدّث الصفحة بـ Ctrl+F5."
+      : `لا توجد أسئلة مسجلة حالياً لحرف (${l}).`;
+    $("qbAnswerText").textContent = "غير متوفر"; $("qbCategory").textContent = "عام";
+    currentActiveQuestion = null; return;
   }
-}
-
-function startTimer(seconds) {
-  clearInterval(countdown);
-  timerSeconds = seconds;
-  updateTimerDisplay();
-
-  countdown = setInterval(() => {
-    timerSeconds--;
-    updateTimerDisplay();
-    if (timerSeconds <= 0) clearInterval(countdown);
-  }, 1000);
-}
-
-function updateTimerDisplay() {
-  document.getElementById('timerDisplay').innerText = timerSeconds < 10 ? `0${timerSeconds}` : timerSeconds;
-}
-
-function addScore(team) {
-  if (team === 1) {
-    score1++;
-    document.getElementById('scoreTeam1').innerText = score1;
-  } else {
-    score2++;
-    document.getElementById('scoreTeam2').innerText = score2;
+  let pool = noRepeat ? all.filter(q => !consumedQuestions[l].includes(q.q)) : all;
+  if (!pool.length) {
+    $("qbQuestionText").textContent = `لقد استهلكت جميع أسئلة حرف (${l}). عطّل "عدم تكرار الأسئلة" أو امسح البيانات لتكرارها.`;
+    $("qbAnswerText").textContent = "انتهت الأسئلة"; $("qbCategory").textContent = "تنبيه";
+    currentActiveQuestion = null; return;
   }
+  currentActiveQuestion = pool[Math.floor(Math.random() * pool.length)];
+  if (!consumedQuestions[l].includes(currentActiveQuestion.q)) { consumedQuestions[l].push(currentActiveQuestion.q); saveConsumed(); }
+  $("qbQuestionText").textContent = currentActiveQuestion.q;
+  $("qbAnswerText").textContent = currentActiveQuestion.a;
+  $("qbCategory").textContent = currentActiveQuestion.cat || "عام";
+  $("letterConsumedPerc").textContent = letterPercent(l) + "%";
 }
 
-function nextRound() {
-  currentRound++;
-  document.getElementById('roundTitle').innerText = `الجولة ${currentRound}`;
-  document.getElementById('questionText').innerText = 'اختر حرفاً من الخلية لبدء السؤال';
-  document.getElementById('currentLetterBadge').innerText = '؟';
-  document.getElementById('showAnswerBtn').style.display = 'none';
-  document.getElementById('newQuestionBtn').style.display = 'none';
-  document.getElementById('teamAssignButtons').style.display = 'none';
-  document.getElementById('answerText').classList.add('hidden');
-  selectedTileElement = null;
-  initRound();
+function toggleQbAnswer() {
+  playSound("click");
+  const box = $("qbAnswerBox");
+  const open = box.style.display === "none";
+  box.style.display = open ? "block" : "none";
+  $("toggleAnswerBtn").textContent = open ? "إخفاء الإجابة" : "عرض الإجابة";
 }
-
-function playVictorySound() {
-  try {
-    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    [523.25, 659.25, 783.99].forEach((freq, index) => {
-      const osc = audioCtx.createOscillator();
-      const gain = audioCtx.createGain();
-      osc.frequency.value = freq;
-      gain.gain.setValueAtTime(0.2, audioCtx.currentTime + index * 0.1);
-      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + index * 0.1 + 0.2);
-      osc.connect(gain);
-      gain.connect(audioCtx.destination);
-      osc.start(audioCtx.currentTime + index * 0.1);
-      osc.stop(audioCtx.currentTime + index * 0.1 + 0.2);
-    });
-  } catch (e) {}
-}
-
-function triggerConfetti() {
-  const container = document.getElementById('confettiContainer');
-  container.innerHTML = '';
-  const colors = ['#ffde00', '#00bcd4', '#71bf43', '#f58220', '#e91e63'];
-
-  for (let i = 0; i < 50; i++) {
-    const piece = document.createElement('div');
-    piece.className = 'confetti-piece';
-    piece.style.left = Math.random() * 100 + '%';
-    piece.style.backgroundColor = colors[Math.floor(Math.random() * colors.length)];
-    piece.style.width = (Math.random() * 8 + 6) + 'px';
-    piece.style.height = (Math.random() * 12 + 6) + 'px';
-    container.appendChild(piece);
-  }
-  setTimeout(() => container.innerHTML = '', 3000);
+function nextQbQuestion() { playSound("click"); loadQbQuestion(); }
+function reportQuestion() {
+  playSound("click");
+  if (!currentActiveQuestion) return;
+  toast("تم تسجيل البلاغ، شكراً لك");
 }

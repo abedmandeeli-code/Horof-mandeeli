@@ -1,156 +1,465 @@
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>حروف مع منديلي</title>
-  <link rel="stylesheet" href="style.css">
-  <link href="https://fonts.googleapis.com/css2?family=Changa:wght@700;800&display=swap" rel="stylesheet">
-  <!-- مكتبة توليد الـ QR Code تلقائياً -->
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>حروف مع منديلي - 7rof</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@500;700;900&display=swap" rel="stylesheet">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-  <!-- مكتبة PeerJS للربط اللحظي مع الهواتف بدون سيرفر -->
-  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
 </head>
 <body>
 
-  <!-- 1. شاشة المقدمة -->
-  <div id="introScreen" class="overlay-screen">
-    <div class="intro-content">
-      <div class="animated-logo">
-        <svg class="intro-hex" viewBox="0 0 100 115">
-          <polygon points="50,5 95,30 95,85 50,110 5,85 5,30" />
-          <text x="50%" y="55%" text-anchor="middle" dominant-baseline="middle">م</text>
-        </svg>
-      </div>
-      <h1 class="intro-title">حروف مع منديلي</h1>
-      <p class="intro-subtitle">مسابقة الحروف والذكاء التفاعلية</p>
-      
-      <!-- باركود الدخول للعبة -->
-      <div class="qr-container">
-        <p class="qr-label">امسح الباركود لفتح اللعبة على الهاتف:</p>
-        <div id="gameQRCode" class="qr-box"></div>
-      </div>
+  <div class="bg-pattern" id="bgPattern"></div>
 
-      <button class="btn-start" onclick="goToSettings()">ابدأ المسابقة 🚀</button>
+  <!-- القائمة الرئيسية -->
+  <div class="main-card" id="mainMenuCard">
+    <div class="header">
+      <span class="badge free-badge">!Free</span>
+      <h1 class="logo-title">7rof</h1>
+      <h2 class="logo-subtitle">منديلي</h2>
+    </div>
+    <div class="actions">
+      <div class="button-row">
+        <button class="btn btn-primary" onclick="openCreateRoom()">إنشاء غرفة</button>
+        <button class="btn btn-primary" onclick="openJoinRoom()">الانضمام لغرفة</button>
+      </div>
+      <div class="button-full-wrapper">
+        <span class="badge new-badge">جديد</span>
+        <button class="btn btn-secondary btn-full" onclick="openQuestionBank()">بنك الأسئلة</button>
+      </div>
+      <button class="btn btn-secondary btn-full" onclick="openHowToPlay()">شرح طريقة اللعب</button>
+    </div>
+    <div class="footer-links">
+      <a href="#">سياسة الخصوصية</a><span class="divider">|</span>
+      <a href="#">عن الموقع</a><span class="divider">|</span>
+      <a href="#">شروط الاستخدام</a>
     </div>
   </div>
 
-  <!-- 2. شاشة الإعدادات -->
-  <div id="settingsScreen" class="overlay-screen hidden">
-    <div class="settings-card">
-      <h2>إعدادات الفرق والألوان</h2>
-
-      <div class="team-config">
-        <h3>الفريق الأول</h3>
-        <input type="text" id="team1NameInput" value="الفريق الأول" placeholder="اسم الفريق الأول">
-        <div class="color-picker-group">
-          <label>اختر اللون:</label>
-          <input type="color" id="team1ColorInput" value="#71bf43">
-        </div>
-      </div>
-
-      <div class="team-config">
-        <h3>الفريق الثاني</h3>
-        <input type="text" id="team2NameInput" value="الفريق الثاني" placeholder="اسم الفريق الثاني">
-        <div class="color-picker-group">
-          <label>اختر اللون:</label>
-          <input type="color" id="team2ColorInput" value="#f58220">
-        </div>
-      </div>
-
-      <button class="btn-start" onclick="startGame()">الدخول لشاشة اللعبة 🎮</button>
+  <!-- شاشة الانتقال بين الجولات -->
+  <div id="roundTransitionScreen" class="round-screen">
+    <div class="round-announcement-box">
+      <h1 class="round-title-main" id="roundTitleText">الجولة الأولى</h1>
+      <button class="btn btn-primary start-round-btn" onclick="startActualRound()">بدء الجولة</button>
     </div>
   </div>
 
-  <!-- 3. نافذة احتفالية الفوز والتوصيل -->
-  <div id="winnerModal" class="overlay-screen hidden" style="z-index: 3000;">
-    <div class="winner-card">
-      <div class="trophy-icon">🏆</div>
-      <h2 id="winnerTeamName">مبروك للفريق الفائز!</h2>
-      <p>تم إكمال المسار بنجاح واقتناص الجولة!</p>
-      <button class="btn-start" onclick="closeWinnerModal()" style="margin-top: 15px;">استمرار 🚀</button>
+  <!-- شاشة اللعب -->
+  <div id="gameScreen" class="game-screen">
+    <div class="game-top-bar">
+      <div class="corner-logo brand" aria-label="حروف مع منديلي">
+        <span class="b1">حروف</span><span class="b2">مع</span><span class="b3">منديلي</span>
+      </div>
+      <div class="top-center-btns">
+        <button class="top-btn" onclick="openHowToPlay()">شرح اللعب</button>
+        <button class="top-btn" onclick="openQuestionBank()">بوابة الأسئلة</button>
+        <button class="top-btn top-btn-yellow" onclick="backToRoom()">الرجوع للغرفة</button>
+        <button class="top-btn" id="soundToggleBtn" onclick="toggleSound()">كتم أصوات اللعبة 🔊</button>
+      </div>
+    </div>
+
+    <div class="game-content-layout">
+      <div class="game-sidebar">
+        <div class="score-hint" id="scoreHint">اضغط على لون الفريق في نتائج الجولات لاحتساب النتيجة</div>
+
+        <div class="score-card">
+          <div class="score-header">
+            <span>نتائج الجولات</span>
+            <span class="round-badge-text" id="currentRoundBadge">الجولة الأولى</span>
+          </div>
+          <div class="score-teams-row">
+            <div class="score-box green-score" onclick="colorSelectedCell('green')">
+              <span class="team-name">الأخضر</span>
+              <span class="score-num" id="greenScoreVal">0</span>
+            </div>
+            <div class="score-box orange-score" onclick="colorSelectedCell('orange')">
+              <span class="team-name">البرتقالي</span>
+              <span class="score-num" id="orangeScoreVal">0</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="players-panel" id="playersPanel">
+          <div class="players-panel-title">اللاعبون <span id="playersCountTxt">0</span></div>
+          <div class="player-bubbles" id="playerBubbles"></div>
+          <div class="buzz-controls">
+            <button class="btn btn-secondary btn-full small-btn" onclick="resetButtons()">إعادة ضبط الأزرار</button>
+            <button class="btn btn-secondary btn-full small-btn" onclick="resetSecondChance()">إعادة ضبط +10ث</button>
+          </div>
+        </div>
+
+        <button class="btn btn-secondary btn-full clear-cell-btn" id="clearCellBtn" onclick="openClearOptions()">مسح الخلية</button>
+      </div>
+
+      <div class="game-board-frame" id="boardFrame">
+        <div class="hex-grid-wrapper" id="hexGridWrapper"></div>
+      </div>
     </div>
   </div>
 
-  <!-- 4. شاشة اللعبة الرئيسية -->
-  <div id="mainGame" class="game-wrapper hidden">
-    <div id="confettiContainer" class="confetti-container"></div>
-
-    <!-- شبكة الحروف السداسية -->
-    <div class="board-section">
-      <div class="hex-grid" id="hexGrid"></div>
+  <!-- شاشة اللاعب (زر الضغط) -->
+  <div id="playerScreen" class="player-screen">
+    <div class="player-top">
+      <div class="player-name-tag" id="pScreenName">—</div>
+      <div class="player-team-tag" id="pScreenTeam">—</div>
     </div>
+    <div class="buzzer-wrap">
+      <button class="buzzer" id="buzzerBtn" onclick="playerPress()"><span id="buzzerLabel"></span></button>
+      <div class="buzzer-status" id="buzzerStatus">جاهز</div>
+    </div>
+    <button class="btn btn-secondary leave-btn" onclick="playerLeave()">خروج من الغرفة</button>
+  </div>
 
-    <!-- القائمة الجانبية -->
-    <div class="sidebar-section">
-      <div class="top-bar">
-        <button class="menu-btn" onclick="openSettings()">⚙️</button>
-        <div class="round-title" id="roundTitle">الجولة الأولى</div>
+  <!-- نافذة بنك الأسئلة التمهيدية -->
+  <div id="questionBankModal" class="modal-overlay">
+    <div class="modal-content qbank-info-content">
+      <div class="qb-header-logo">
+        <h1 class="qb-logo-title">منديلي</h1>
+        <h2 class="qb-logo-sub">QUESTION BANK</h2>
       </div>
-
-      <!-- حالة ربط كود الهاتف -->
-      <div class="buzzer-status-card" id="buzzerStatusCard">
-        <span id="roomCodeDisplay">كود ربط الهواتف: جاري الاتصال...</span>
-      </div>
-
-      <!-- بطاقة السؤال الثابتة -->
-      <div class="question-card">
-        <div class="letter-badge" id="currentLetterBadge">؟</div>
-        
-        <div class="question-content-box">
-          <p class="question-text" id="questionText">اختر حرفاً من الخلية لبدء السؤال</p>
-          <div class="answer-text hidden" id="answerText"></div>
+      <div class="qb-notice-box">
+        <div class="qb-notice-item">
+          <span class="qb-icon">ⓘ</span>
+          <div><strong>نسخة تجريبية (Beta)</strong>
+          <p>الموقع ما زال في مرحلة التجريب، وإذا واجهتك مشاكل يسعدنا أن تتواصل معنا لنقوم بحلها فوراً.</p></div>
         </div>
-
-        <div class="card-buttons">
-          <button class="btn btn-show-answer" id="showAnswerBtn" onclick="toggleAnswer()" style="display:none;">عرض الإجابة</button>
-          <button class="btn btn-new-question" id="newQuestionBtn" onclick="changeQuestion()" style="display:none;">سؤال جديد</button>
-        </div>
-
-        <!-- أزرار تعيين الفريق + زر التعديل بالأيقونة الجديدة 🔀 -->
-        <div class="team-assign-buttons" id="teamAssignButtons" style="display:none;">
-          <button class="btn-assign" onclick="assignTileToTeam(1)">
-            <span class="team-box-indicator t1-box"></span>
-            <span id="assignT1Label">الفريق الأول</span>
-          </button>
-          <button class="btn-assign" onclick="assignTileToTeam(2)">
-            <span class="team-box-indicator t2-box"></span>
-            <span id="assignT2Label">الفريق الثاني</span>
-          </button>
-          <button class="btn-assign btn-reset-tile" onclick="assignTileToTeam(0)" title="تعديل أو إلغاء تلوين الخلية">
-            🔀
-          </button>
+        <div class="qb-notice-item">
+          <span class="qb-icon">🚩</span>
+          <div><strong>التبليغ عن الأسئلة الخاطئة</strong>
+          <p>قد تحدث بعض الأخطاء، فإذا لاحظت سؤالاً خاطئاً استخدم علامة العلم للتبليغ وسيتم مراجعته وتحديثه أو حذفه.</p></div>
         </div>
       </div>
-
-      <!-- المؤقت -->
-      <div class="timer-card">
-        <div class="timer-display" id="timerDisplay">00</div>
-        <div class="timer-buttons">
-          <button class="btn-timer btn-3s" onclick="startTimer(3)">3 ثوانٍ</button>
-          <button class="btn-timer btn-10s" onclick="startTimer(10)">10 ثوانٍ</button>
-        </div>
+      <div class="qb-qr-section">
+        <p class="qb-qr-title">امسح الكود أو اضغط للذهاب</p>
+        <div id="qbQrCode"></div>
+        <button class="btn btn-primary btn-full go-qb-btn" onclick="enterQuestionBankApp()">الذهاب إلى موقع بنك الأسئلة ↗</button>
+        <button class="btn btn-secondary btn-full" onclick="closeQuestionBankModal()">إغلاق</button>
       </div>
-
-      <!-- لوحة النقاط -->
-      <div class="teams-scores">
-        <div class="team-row" id="team1Row">
-          <button class="check-btn" onclick="addScore(1)">✔</button>
-          <span class="team-name" id="team1Label">الفريق الأول</span>
-          <span class="score-box" id="scoreTeam1">0</span>
-        </div>
-        <div class="team-row" id="team2Row">
-          <button class="check-btn" onclick="addScore(2)">✔</button>
-          <span class="team-name" id="team2Label">الفريق الثاني</span>
-          <span class="score-box" id="scoreTeam2">0</span>
-        </div>
-      </div>
-      
-      <button class="btn-next-round" onclick="nextRound()">الجولة التالية 🔄</button>
     </div>
   </div>
 
-  <script src="question.js"></script>
+  <!-- تطبيق بنك الأسئلة -->
+  <div id="questionBankAppModal" class="modal-overlay full-app-overlay">
+    <div id="qbSplashView" class="qb-splash" style="display:none;">
+      <h1 class="qb-logo-title">منديلي</h1>
+      <h2 class="qb-logo-sub">QUESTIONS</h2>
+    </div>
+
+    <div id="qbLoginView" class="qb-app-card" style="display:none;">
+      <div class="qb-app-header">
+        <h1 class="qb-logo-title">منديلي</h1>
+        <h2 class="qb-logo-sub">QUESTION BANK</h2>
+      </div>
+      <h3 class="qb-page-title" style="font-size:1.2rem;">تسجيل الدخول بالبريد الإلكتروني</h3>
+      <form onsubmit="qbLogin(event)" class="qb-login-form">
+        <input type="email" id="qbEmailInput" class="form-input qb-input" placeholder="example@gmail.com" autocomplete="email" dir="ltr" required />
+        <input type="text" id="qbNameInput" class="form-input qb-input" placeholder="الاسم (اختياري)" maxlength="24" />
+        <p class="qb-login-error" id="qbLoginError"></p>
+        <button type="submit" class="btn btn-primary btn-full">دخول</button>
+        <button type="button" class="btn btn-secondary btn-full" onclick="closeQbApp()">رجوع</button>
+      </form>
+    </div>
+
+    <div id="qbMainView" class="qb-app-card">
+      <div class="qb-app-header">
+        <h1 class="qb-logo-title">منديلي</h1>
+        <h2 class="qb-logo-sub">QUESTION BANK</h2>
+      </div>
+      <div class="qb-user-welcome">أهلاً <span id="qbUserName">منظم</span></div>
+      <div class="qb-menu-actions">
+        <button class="btn btn-primary btn-full" onclick="showQbGrid()">بدء جولة</button>
+        <button class="btn btn-secondary btn-full" onclick="showQbProfile()">بياناتي</button>
+        <button class="btn btn-secondary btn-full btn-red-text" onclick="qbLogout()">تسجيل خروج</button>
+      </div>
+      <div class="qb-bottom-link" onclick="closeQbApp()">الرجوع إلى 7rof</div>
+    </div>
+
+    <div id="qbProfileView" class="qb-app-card" style="display:none;">
+      <h2 class="qb-page-title">بياناتي</h2>
+      <div class="qb-profile-box">
+        <label>البريد الإلكتروني:</label>
+        <div class="qb-info-value" id="qbProfileEmail" dir="ltr">—</div>
+        <label style="margin-top:12px;display:block;">عدد الأسئلة المستهلكة:</label>
+        <div class="qb-info-value" id="qbConsumedTotal">0</div>
+        <button class="btn btn-secondary btn-full" style="margin-top:10px;" onclick="clearQbData()">مسح البيانات</button>
+      </div>
+      <button class="btn btn-secondary btn-full" onclick="showQbMain()" style="margin-top:20px;">الرجوع للصفحة الرئيسية</button>
+    </div>
+
+    <div id="qbGridView" class="qb-app-card qb-wide-card" style="display:none;">
+      <div class="qb-letters-grid" id="qbLettersContainer"></div>
+      <div class="qb-stats-row">
+        <div class="qb-stat-card"><span class="qb-stat-num" id="consumedPercentageVal">0%</span><span class="qb-stat-lbl">نسبة الأسئلة المستهلكة</span></div>
+        <div class="qb-stat-card"><span class="qb-stat-num" id="totalQuestionsCount">0</span><span class="qb-stat-lbl">إجمالي الأسئلة في الموقع</span></div>
+      </div>
+      <div class="qb-toggle-row">
+        <label class="switch"><input type="checkbox" id="noRepeatToggle" checked onchange="toggleNoRepeatMode()"><span class="slider"></span></label>
+        <div class="toggle-text"><strong>عدم تكرار الأسئلة المستهلكة</strong>
+        <p>الأسئلة المستهلكة هي التي طُرحت سابقاً. إذا فُعّل هذا الخيار سيتم استبعادها من كل جولة.</p></div>
+      </div>
+      <button class="btn btn-secondary btn-full" onclick="showQbMain()" style="margin-top:15px;">الرجوع للصفحة الرئيسية</button>
+    </div>
+
+    <div id="qbQuestionView" class="qb-app-card" style="display:none;">
+      <div class="qb-q-header">
+        <button class="qb-back-link" onclick="showQbGrid()">الرجوع واختيار الحرف</button>
+        <div class="qb-current-letter-badge">الحرف: <span id="currentQbLetter">أ</span></div>
+        <div class="qb-q-meta">
+          <span>نسبة الاستهلاك في الحرف: <strong id="letterConsumedPerc">0%</strong></span> |
+          <span>التصنيف: <strong id="qbCategory">عام</strong></span>
+        </div>
+      </div>
+      <div class="qb-q-box">
+        <button class="qb-report-btn" title="تبليغ عن السؤال" onclick="reportQuestion()">🚩</button>
+        <p class="qb-q-text" id="qbQuestionText">—</p>
+        <div class="qb-answer-box" id="qbAnswerBox" style="display:none;"><strong id="qbAnswerText">غير متوفر</strong></div>
+      </div>
+      <div class="qb-q-actions">
+        <button class="btn btn-primary btn-full" id="toggleAnswerBtn" onclick="toggleQbAnswer()">عرض الإجابة</button>
+        <button class="btn btn-secondary btn-full" onclick="nextQbQuestion()">تغيير السؤال</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- فوز بالجولة -->
+  <div id="winModal" class="modal-overlay">
+    <div class="modal-content win-modal-content">
+      <h2 class="win-title" id="winModalTitle">الفريق فاز بالجولة!</h2>
+      <p class="win-subtitle" id="winModalSub">هل تريد حفظ النتيجة والذهاب للجولة التالية؟</p>
+      <div class="win-mini-box" id="winMiniGrid"></div>
+      <div class="win-actions-row">
+        <button class="btn-win-red" onclick="cancelLastMove()">إلغاء وحذف آخر إجابة</button>
+        <button class="btn-win-green" onclick="saveAndNextRound()">حفظ ومتابعة</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- فوز بالمباراة -->
+  <div id="finalModal" class="modal-overlay">
+    <div class="modal-content win-modal-content">
+      <h2 class="win-title" id="finalTitle">🏆</h2>
+      <p class="win-subtitle" id="finalSub"></p>
+      <div class="win-actions-row">
+        <button class="btn-win-green" onclick="finishMatch()">العودة للغرفة</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="clearOptionsModal" class="modal-overlay">
+    <div class="modal-content clear-options-content">
+      <h2 class="modal-main-title">خيارات الخلية</h2>
+      <p class="clear-warning">تنبيه: المسح هنا يزيل <b>نقاط الجولة الحالية فقط</b> ويُبقي نقاط الجولات المحفوظة.</p>
+      <div class="clear-options-stack">
+        <button class="btn btn-secondary btn-full" onclick="executeClear(true)">مسح الخلية + توزيع الحروف</button>
+        <button class="btn btn-secondary btn-full" onclick="executeClear(false)">مسح الخلية</button>
+        <button class="btn btn-secondary btn-full cancel-opt-btn" onclick="closeClearOptions()">إلغاء</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- قائمة اللاعب (للمنظم) -->
+  <div id="playerMenuModal" class="modal-overlay">
+    <div class="modal-content clear-options-content">
+      <h2 class="modal-main-title" id="playerMenuName">لاعب</h2>
+      <div class="clear-options-stack">
+        <button class="btn btn-secondary btn-full" onclick="changePlayerTeam()">تغيير الفريق</button>
+        <button class="btn btn-secondary btn-full btn-red-text" onclick="kickPlayer()">طرد اللاعب</button>
+        <button class="btn btn-secondary btn-full cancel-opt-btn" onclick="closePlayerMenu()">إغلاق</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- إنشاء غرفة -->
+  <div id="createRoomModal" class="modal-overlay">
+    <div class="modal-content create-room-content">
+      <div class="room-section">
+        <div class="room-section-header"><span>اللاعبين</span><span id="roomPlayersCount">0/40</span></div>
+        <p class="room-sub-text" id="roomPlayersEmpty">لا يوجد لاعبون حالياً.<br>شارك رابط الغرفة لإضافة لاعبين وبدء اللعب.</p>
+        <div class="room-players-list" id="roomPlayersList"></div>
+      </div>
+
+      <div class="room-section collapsible-section">
+        <div class="section-toggle-header" onclick="toggleSection('shareBody','shareArrow')">
+          <span>مشاركة الغرفة</span><span class="arrow-icon" id="shareArrow">▲</span>
+        </div>
+        <div id="shareBody" class="share-body" style="display:none;">
+          <div class="qr-container">
+            <div class="room-code-display" id="roomCodeDisplay">--</div>
+            <div id="qrcode"></div>
+            <button class="btn btn-secondary btn-full" style="padding:8px;font-size:.85rem;" onclick="copyRoomLink()">نسخ الرابط</button>
+            <p class="qr-hint">امسح الباركود للانضمام إلى الغرفة مباشرة</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="room-section collapsible-section">
+        <div class="section-toggle-header" onclick="toggleSection('settingsBody','settingsArrow')">
+          <span>إعدادات اللعبة</span><span class="arrow-icon" id="settingsArrow">▼</span>
+        </div>
+        <div id="settingsBody" class="settings-body">
+          <div class="setting-group">
+            <label class="setting-label">نمط اللعب:</label>
+            <div class="options-row">
+              <button type="button" class="opt-btn active" id="mode1" onclick="selectOption('mode1')">خلية الحروف + أزرار</button>
+              <button type="button" class="opt-btn" id="mode2" onclick="selectOption('mode2')">أزرار فقط</button>
+            </div>
+            <button type="button" class="opt-btn btn-full-opt" id="mode3" onclick="selectOption('mode3')">خلية حروف فقط</button>
+          </div>
+
+          <div class="in-modal-logo">
+            <div class="brand big"><span class="b1">حروف</span><span class="b2">مع</span><span class="b3">منديلي</span></div>
+          </div>
+
+          <div class="setting-group">
+            <label class="setting-label">اسم المنظم:</label>
+            <input type="text" id="organizerName" class="form-input" placeholder="أدخل اسم المنظم" />
+          </div>
+
+          <div class="setting-group">
+            <label class="setting-label">حجم الخلية:</label>
+            <div class="grid-size-row">
+              <button type="button" class="grid-opt-btn" id="grid3" onclick="selectGrid('grid3')"><span class="grid-title">3x3</span><span class="grid-desc">سريع جداً</span></button>
+              <button type="button" class="grid-opt-btn" id="grid4" onclick="selectGrid('grid4')"><span class="grid-title">4x4</span><span class="grid-desc">سريع</span></button>
+              <button type="button" class="grid-opt-btn active" id="grid5" onclick="selectGrid('grid5')"><span class="grid-title">5x5</span><span class="grid-desc">عادي</span></button>
+            </div>
+          </div>
+
+          <div class="setting-group">
+            <label class="setting-label">عدد الجولات للفوز:</label>
+            <div class="rounds-row">
+              <button type="button" class="round-btn" id="round3" onclick="selectRound(1)">جولة</button>
+              <button type="button" class="round-btn active" id="round2" onclick="selectRound(2)">جولتين</button>
+              <button type="button" class="round-btn" id="round1" onclick="selectRound(3)">ثلاث</button>
+            </div>
+          </div>
+
+          <button type="button" class="btn btn-primary btn-full start-game-action-btn" onclick="startGame()">ابدأ اللعب</button>
+          <button type="button" class="btn btn-secondary btn-full close-room-btn" onclick="closeRoom()">إلغاء وإغلاق الغرفة</button>
+        </div>
+      </div>
+      <button type="button" class="btn btn-secondary btn-full" onclick="closeCreateRoom()">إخفاء النافذة (الغرفة تبقى مفتوحة)</button>
+    </div>
+  </div>
+
+  <!-- الانضمام لغرفة -->
+  <div id="joinRoomModal" class="modal-overlay">
+    <div class="modal-content join-modal-content">
+      <div class="header">
+        <span class="badge free-badge">!Free</span>
+        <h1 class="logo-title">7rof</h1>
+        <h2 class="logo-subtitle">منديلي</h2>
+      </div>
+      <form onsubmit="enterGame(event)" class="join-form">
+        <div class="form-group"><label for="roomCode">رمز الغرفة:</label>
+          <input type="text" id="roomCode" class="form-input" inputmode="numeric" placeholder="أدخل رمز الغرفة" required /></div>
+        <div class="form-group"><label for="playerName">اسمك:</label>
+          <input type="text" id="playerName" class="form-input" placeholder="أدخل اسمك" maxlength="14" required /></div>
+        <div class="form-group"><label>اختر فريقك:</label>
+          <div class="team-selector">
+            <button type="button" class="team-btn green-team active" id="greenTeamBtn" onclick="selectTeam('green')">أخضر</button>
+            <button type="button" class="team-btn orange-team" id="orangeTeamBtn" onclick="selectTeam('orange')">برتقالي</button>
+          </div></div>
+        <button type="submit" class="btn btn-primary btn-full submit-game-btn">دخول اللعبة</button>
+        <button type="button" class="btn btn-secondary btn-full back-btn" onclick="closeJoinRoom()">رجوع</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- شرح طريقة اللعب -->
+  <div id="howToPlayModal" class="modal-overlay">
+    <div class="modal-content how-to-play-modal-content">
+      <h2 class="modal-main-title">شرح طريقة اللعب</h2>
+      <div class="tabs-container">
+        <button class="tab-btn active" id="organizerTabBtn" onclick="switchTab('organizer')">نسخة المنظم</button>
+        <button class="tab-btn" id="playerTabBtn" onclick="switchTab('player')">نسخة اللاعب</button>
+      </div>
+
+      <div id="organizerTabContent" class="tab-content active-content">
+        <div class="section-block">
+          <h3 class="section-title">🏆 كيف يفوز اللاعبون؟</h3>
+          <p class="section-text">الهدف تكوين مسار متصل من الحروف بلون الفريق: الأخضر من الأعلى إلى الأسفل، والبرتقالي من اليمين إلى اليسار.</p>
+        </div>
+        <div class="section-block">
+          <h3 class="section-title">📋 متطلبات اللعبة:</h3>
+          <div class="req-subtitle">مع شاشة (تلفزيون):</div>
+          <ul class="req-list">
+            <li>💻 تنشئ الغرفة بكمبيوتر أو جهاز متصل بالشاشة</li>
+            <li>📱 جوال للمنظم لقراءة الأسئلة من بنك الأسئلة</li>
+            <li>📱 كل لاعب معه جوال ويدخل على الغرفة من الرابط</li>
+          </ul>
+          <div class="req-subtitle" style="margin-top:10px;">بدون شاشة (تلفزيون):</div>
+          <ul class="req-list">
+            <li>💻 جهاز تنشئ منه الغرفة (كمبيوتر، ايباد، جوال)</li>
+            <li>📱 جوال للمنظم لقراءة الأسئلة من بنك الأسئلة</li>
+            <li>📱 كل لاعب معه جوال ويدخل على الغرفة من الرابط</li>
+          </ul>
+        </div>
+        <div class="section-block">
+          <h3 class="section-title">🎮 أزرار التحكم للمنظم:</h3>
+          <ul class="req-list">
+            <li><strong>إعادة ضبط الأزرار</strong>: يفتح المجال للاعبين للضغط من جديد للسؤال القادم.</li>
+            <li><strong>إعادة ضبط +10ث</strong>: فرصة ثانية! تُفعَّل بعد إجابة خاطئة أو انتهاء وقت اللاعب الأول، ليُفتح المجال للفريق الآخر للإجابة خلال 10 ثوانٍ.</li>
+            <li><strong>مسح الخلية</strong>: يصفّر جميع النقاط في الجولة، مع خيار لتغيير الحروف عشوائياً أو إبقائها.</li>
+          </ul>
+        </div>
+        <div class="section-block">
+          <h3 class="section-title">⭐ نمط خلية حروف فقط:</h3>
+          <p class="section-text">نمط للعب بدون استخدام الأجهزة كأزرار، يُستخدم عادةً عند وجود فريقين في أرض الواقع بدلاً من لاعبين إلكترونيين.</p>
+          <p class="section-text" style="font-weight:700;color:#ffeb3b;margin-top:5px;">طريقة الاستخدام:</p>
+          <ol class="req-list">
+            <li>1- اضغط على الحرف المراد الإجابة عليه وسيتم تلوينه بالأصفر.</li>
+            <li>2- عند الإجابة الصحيحة لفريق، اضغط على بطاقة النتيجة للفريق الفائز (الأخضر أو البرتقالي) في قسم "نتائج الجولات" لتلوين الحرف.</li>
+            <li>3- اضغط على الحرف مرة أخرى في أي وقت لإلغاء التحديد.</li>
+          </ol>
+        </div>
+        <div class="section-block">
+          <h3 class="section-title">⭕ التحكم بخلية الحروف وتوزيع النقاط:</h3>
+          <ul class="req-list">
+            <li>اضغط على أي حرف لتحديده (يصبح أصفر).</li>
+            <li>اضغط على حرف آخر لنقل التحديد، أو اضغط عليه مجدداً لإلغاء التحديد.</li>
+            <li>أثناء تحديد الحرف، اضغط على زر اسم اللاعب لاحتساب النقطة وتلوين الحرف بلون فريقه مباشرة!</li>
+          </ul>
+        </div>
+        <div class="section-block">
+          <h3 class="section-title">👥 إدارة اللاعبين:</h3>
+          <p class="section-text">اضغط على زر أي لاعب (بدون تحديد حرف) لتظهر قائمة تتيح لك طرده أو تغيير فريقه، ويظهر زره بأحد الشكلين:</p>
+          <div class="teams-display-row">
+            <div class="team-visual-item"><div class="custom-team-btn btn-team-orange"></div><span>فريق 2</span></div>
+            <div class="team-visual-item"><div class="custom-team-btn btn-team-green"></div><span>فريق 1</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div id="playerTabContent" class="tab-content">
+        <div class="section-block">
+          <h3 class="section-title">🏆 كيف تفوز؟</h3>
+          <p class="section-text">كوّن مسارًا متصلاً من الحروف بلون فريقك (الأخضر من الأعلى للأسفل، البرتقالي من اليمين لليسار). ولتلوين الحرف لفريقك يجب أن تكون الأسرع في ضغط الزر وتعطي الإجابة الصحيحة!</p>
+        </div>
+        <div class="section-block">
+          <h3 class="section-title">⚪ شرح الأزرار (البازر):</h3>
+          <div class="buzzer-explain-item"><div class="buzzer-icon-wrap"><div class="bz-circle bz-blue"></div></div><p><strong>اللون الأزرق:</strong> الزر جاهز! كن مستعداً للضغط فور سماع السؤال.</p></div>
+          <div class="buzzer-explain-item"><div class="buzzer-icon-wrap"><div class="bz-circle bz-green"></div></div><p><strong>اللون الأخضر:</strong> أنت الأسرع! المايك لك لتقديم الإجابة.</p></div>
+          <div class="buzzer-explain-item"><div class="buzzer-icon-wrap"><div class="bz-circle bz-orange"></div></div><p><strong>اللون البرتقالي:</strong> مقفل! هناك لاعب آخر سبقك بالضغط.</p></div>
+          <div class="buzzer-explain-item"><div class="buzzer-icon-wrap"><div class="bz-circle bz-red"></div></div><p><strong>اللون الأحمر:</strong> انتهى الوقت المخصص للإجابة.</p></div>
+          <div class="buzzer-explain-item"><div class="buzzer-icon-wrap"><div class="bz-circle bz-white-num">10</div></div><p><strong>الزر الأبيض (10):</strong> فرصة ثانية! يُفعَّل بعد إجابة خاطئة أو انتهاء وقت اللاعب الأول، ليُفتح المجال للفريق الآخر للإجابة خلال 10 ثوانٍ.</p></div>
+        </div>
+      </div>
+      <button class="btn btn-secondary btn-full close-btn" onclick="closeHowToPlay()">إغلاق الشرح</button>
+    </div>
+  </div>
+
+  <button class="btn-contact" onclick="contactUs()">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+    <span>تواصل معنا</span>
+  </button>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
+  <script src="questions.js"></script>
   <script src="script.js"></script>
 </body>
 </html>
